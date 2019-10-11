@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,6 +52,10 @@
 #ifdef TARGET_ARCH_ppc
 # include "register_ppc.hpp"
 # include "vm_version_ppc.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "register_aarch32.hpp"
+# include "vm_version_aarch32.hpp"
 #endif
 
 // This file contains platform-independent assembler declarations.
@@ -168,6 +172,14 @@ class Label VALUE_OBJ_CLASS_SPEC {
 
   Label() {
     init();
+  }
+
+  ~Label() {
+    assert(is_bound() || is_unused(), "Label was never bound to a location, but it was used as a jmp target");
+  }
+
+  void reset() {
+    init(); //leave _patch_overflow because it points to CodeBuffer.
   }
 };
 
@@ -451,6 +463,9 @@ class AbstractAssembler : public ResourceObj  {
 #endif
 #ifdef TARGET_ARCH_ppc
 # include "assembler_ppc.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "assembler_aarch32.hpp"
 #endif
 
 

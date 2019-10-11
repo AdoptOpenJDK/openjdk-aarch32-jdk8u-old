@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,6 +49,10 @@
 #ifdef TARGET_ARCH_ppc
 # include "nativeInst_ppc.hpp"
 # include "vmreg_ppc.inline.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "nativeInst_aarch32.hpp"
+# include "vmreg_aarch32.inline.hpp"
 #endif
 
 
@@ -128,6 +132,9 @@ LIR_Assembler::LIR_Assembler(Compilation* c):
 
 
 LIR_Assembler::~LIR_Assembler() {
+  // The unwind handler label may be unbound if this destructor is invoked because of a bail-out.
+  // Reset it here to avoid an assertion.
+  _unwind_handler_entry.reset();
 }
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -50,6 +50,8 @@
 # include "adfiles/ad_zero.hpp"
 #elif defined TARGET_ARCH_MODEL_ppc_64
 # include "adfiles/ad_ppc_64.hpp"
+#elif defined TARGET_ARCH_MODEL_aarch32
+# include "adfiles/ad_aarch32.hpp"
 #endif
 
 OptoReg::Name OptoReg::c_frame_pointer;
@@ -95,6 +97,7 @@ Matcher::Matcher()
   idealreg2spillmask  [Op_VecD] = NULL;
   idealreg2spillmask  [Op_VecX] = NULL;
   idealreg2spillmask  [Op_VecY] = NULL;
+  idealreg2spillmask  [Op_RegFlags] = NULL;
 
   idealreg2debugmask  [Op_RegI] = NULL;
   idealreg2debugmask  [Op_RegN] = NULL;
@@ -106,6 +109,7 @@ Matcher::Matcher()
   idealreg2debugmask  [Op_VecD] = NULL;
   idealreg2debugmask  [Op_VecX] = NULL;
   idealreg2debugmask  [Op_VecY] = NULL;
+  idealreg2debugmask  [Op_RegFlags] = NULL;
 
   idealreg2mhdebugmask[Op_RegI] = NULL;
   idealreg2mhdebugmask[Op_RegN] = NULL;
@@ -117,6 +121,7 @@ Matcher::Matcher()
   idealreg2mhdebugmask[Op_VecD] = NULL;
   idealreg2mhdebugmask[Op_VecX] = NULL;
   idealreg2mhdebugmask[Op_VecY] = NULL;
+  idealreg2mhdebugmask[Op_RegFlags] = NULL;
 
   debug_only(_mem_node = NULL;)   // Ideal memory node consumed by mach node
 }
@@ -193,7 +198,7 @@ void Matcher::match( ) {
   const TypeTuple *range = C->tf()->range();
   if( range->cnt() > TypeFunc::Parms ) { // If not a void function
     // Get ideal-register return type
-    int ireg = range->field_at(TypeFunc::Parms)->ideal_reg();
+    uint ireg = range->field_at(TypeFunc::Parms)->ideal_reg();
     // Get machine return register
     uint sop = C->start()->Opcode();
     OptoRegPair regs = return_value(ireg, false);
@@ -2040,6 +2045,12 @@ void Matcher::find_shared( Node *n ) {
         // Node is shared and has no reason to clone.  Flag it as shared.
         // This causes it to match into a register for the sharing.
         set_shared(n);       // Flag as shared and
+        if (n->is_DecodeNarrowPtr()) {
+          // Oop field/array element loads must be shared but since
+          // they are shared through a DecodeN they may appear to have
+          // a single use so force sharing here.
+          set_shared(n->in(1));
+        }
         mstack.pop();        // remove node from stack
         continue;
       }
@@ -2160,13 +2171,6 @@ void Matcher::find_shared( Node *n ) {
         if( _must_clone[mop] ) {
           mstack.push(m, Visit);
           continue; // for(int i = ...)
-        }
-
-        if( mop == Op_AddP && m->in(AddPNode::Base)->is_DecodeNarrowPtr()) {
-          // Bases used in addresses must be shared but since
-          // they are shared through a DecodeN they may appear
-          // to have a single use so force sharing here.
-          set_shared(m->in(AddPNode::Base)->in(1));
         }
 
         // if 'n' and 'm' are part of a graph for BMI instruction, clone this node.

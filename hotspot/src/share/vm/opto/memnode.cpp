@@ -1359,6 +1359,14 @@ Node *LoadNode::split_through_phi(PhaseGVN *phase) {
         Node* in = mem->in(i);
         Node*  m = optimize_memory_chain(in, t_oop, this, phase);
         if (m == mem) {
+          if (i == 1) {
+            // if the first edge was a loop, check second edge too.
+            // If both are replaceable - we are in an infinite loop
+            Node *n = optimize_memory_chain(mem->in(2), t_oop, this, phase);
+            if (n == mem) {
+              break;
+            }
+          }
           set_req(Memory, mem->in(cnt - i));
           return this; // made change
         }
@@ -1514,10 +1522,14 @@ Node *LoadNode::Ideal(PhaseGVN *phase, bool can_reshape) {
   Node* ctrl    = in(MemNode::Control);
   Node* address = in(MemNode::Address);
 
+  bool addr_mark = ((phase->type(address)->isa_oopptr() || phase->type(address)->isa_narrowoop()) &&
+         phase->type(address)->is_ptr()->offset() == oopDesc::mark_offset_in_bytes());
+
   // Skip up past a SafePoint control.  Cannot do this for Stores because
   // pointer stores & cardmarks must stay on the same side of a SafePoint.
   if( ctrl != NULL && ctrl->Opcode() == Op_SafePoint &&
-      phase->C->get_alias_index(phase->type(address)->is_ptr()) != Compile::AliasIdxRaw ) {
+      phase->C->get_alias_index(phase->type(address)->is_ptr()) != Compile::AliasIdxRaw  &&
+      !addr_mark ) {
     ctrl = ctrl->in(0);
     set_req(MemNode::Control,ctrl);
   }
@@ -3349,9 +3361,6 @@ bool InitializeNode::detect_init_independence(Node* n, int& count) {
 // within the initialized memory.
 intptr_t InitializeNode::can_capture_store(StoreNode* st, PhaseTransform* phase, bool can_reshape) {
   const int FAIL = 0;
-  if (st->is_unaligned_access()) {
-    return FAIL;
-  }
   if (st->req() != MemNode::ValueIn + 1)
     return FAIL;                // an inscrutable StoreNode (card mark?)
   Node* ctl = st->in(MemNode::Control);
@@ -3367,6 +3376,10 @@ intptr_t InitializeNode::can_capture_store(StoreNode* st, PhaseTransform* phase,
     return FAIL;                // inscrutable address
   if (alloc != allocation())
     return FAIL;                // wrong allocation!  (store needs to float up)
+  int size_in_bytes = st->memory_size();
+  if ((size_in_bytes != 0) && (offset % size_in_bytes) != 0) {
+    return FAIL;                // mismatched access
+  }
   Node* val = st->in(MemNode::ValueIn);
   int complexity_count = 0;
   if (!detect_init_independence(val, complexity_count))

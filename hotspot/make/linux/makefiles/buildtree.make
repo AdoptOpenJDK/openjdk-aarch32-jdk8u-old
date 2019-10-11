@@ -1,5 +1,6 @@
 #
 # Copyright (c) 2005, 2015, Oracle and/or its affiliates. All rights reserved.
+# Copyright 2019 Red Hat, Inc.
 # DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 #
 # This code is free software; you can redistribute it and/or modify it
@@ -192,10 +193,11 @@ LP64_SETTING/32 = LP64 = \#empty
 LP64_SETTING/64 = LP64 = 1
 
 DATA_MODE/i486 = 32
+DATA_MODE/amd64 = 64
 DATA_MODE/sparc = 32
 DATA_MODE/sparcv9 = 64
-DATA_MODE/amd64 = 64
 DATA_MODE/ppc64 = 64
+DATA_MODE/aarch32 = 32
 
 DATA_MODE = $(DATA_MODE/$(BUILDARCH))
 
@@ -220,6 +222,10 @@ flags.make: $(BUILDTREE_MAKE) ../shared_dirs.lst
 	echo "SA_BUILD_VERSION = $(HS_BUILD_VER)"; \
 	echo "HOTSPOT_BUILD_USER = $(HOTSPOT_BUILD_USER)"; \
 	echo "HOTSPOT_VM_DISTRO = $(HOTSPOT_VM_DISTRO)"; \
+	echo "VENDOR = $(COMPANY_NAME)"; \
+	echo "VENDOR_URL = $(VENDOR_URL)"; \
+	echo "VENDOR_URL_BUG = $(VENDOR_URL_BUG)"; \
+	echo "VENDOR_URL_VM_BUG = $(VENDOR_URL_VM_BUG)"; \
 	echo "OPENJDK = $(OPENJDK)"; \
 	echo "$(LP64_SETTING/$(DATA_MODE))"; \
 	echo; \

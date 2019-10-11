@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,6 +46,9 @@
 #endif
 #ifdef TARGET_ARCH_ppc
 # include "vmreg_ppc.inline.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "vmreg_aarch32.inline.hpp"
 #endif
 
 // The functions in this file builds OopMaps after all scheduling is done.
@@ -629,7 +632,7 @@ void Compile::BuildOopMaps() {
     // last block as his only undone child, we can move the OopFlow from the
     // pred to this block.  Otherwise we have to grab a new OopFlow.
     OopFlow *flow = NULL;       // Flag for finding optimized flow
-    Block *pred = (Block*)0xdeadbeef;
+    Block *pred = (Block*)((intptr_t)0xdeadbeef);
     // Scan this block's preds to find a done predecessor
     for (uint j = 1; j < b->num_preds(); j++) {
       Block* p = _cfg->get_block_for_node(b->pred(j));

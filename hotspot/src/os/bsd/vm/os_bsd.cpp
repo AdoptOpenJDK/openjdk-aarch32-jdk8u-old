@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -3611,7 +3611,7 @@ void os::init(void) {
 
   Bsd::initialize_system_info();
 
-  // main_thread points to the aboriginal thread
+  // _main_thread points to the thread that created/loaded the JVM.
   Bsd::_main_thread = pthread_self();
 
   Bsd::clock_init();
@@ -3765,6 +3765,16 @@ void os::make_polling_page_readable(void) {
 };
 
 int os::active_processor_count() {
+  // User has overridden the number of active processors
+  if (ActiveProcessorCount > 0) {
+    if (PrintActiveCpus) {
+      tty->print_cr("active_processor_count: "
+                    "active processor count set by user : %d",
+                     ActiveProcessorCount);
+    }
+    return ActiveProcessorCount;
+  }
+
   return _processor_count;
 }
 
@@ -3947,8 +3957,7 @@ bool os::dir_is_empty(const char* path) {
 
   /* Scan the directory */
   bool result = true;
-  char buf[sizeof(struct dirent) + MAX_PATH];
-  while (result && (ptr = ::readdir(dir)) != NULL) {
+  while (result && (ptr = readdir(dir)) != NULL) {
     if (strcmp(ptr->d_name, ".") != 0 && strcmp(ptr->d_name, "..") != 0) {
       result = false;
     }
@@ -4706,7 +4715,7 @@ extern char** environ;
 // or -1 on failure (e.g. can't fork a new process).
 // Unlike system(), this function can be called from signal handler. It
 // doesn't block SIGINT et al.
-int os::fork_and_exec(char* cmd) {
+int os::fork_and_exec(char* cmd, bool use_vfork_if_available) {
   const char * argv[4] = {"sh", "-c", cmd, NULL};
 
   // fork() in BsdThreads/NPTL is not async-safe. It needs to run

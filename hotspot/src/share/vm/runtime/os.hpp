@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -152,8 +152,16 @@ class os: AllStatic {
   static size_t page_size_for_region(size_t region_size, size_t min_pages, bool must_be_aligned);
 
   static void initialize_initial_active_processor_count();
+
+  LINUX_ONLY(static void pd_init_container_support();)
+
  public:
   static void init(void);                      // Called before command line parsing
+
+  static void init_container_support() {       // Called during command line parsing.
+     LINUX_ONLY(pd_init_container_support();)
+  }
+
   static void init_before_ergo(void);          // Called after command line parsing
                                                // before VM ergonomics processing.
   static jint init_2(void);                    // Called after command line parsing
@@ -449,7 +457,24 @@ class os: AllStatic {
   static bool create_thread(Thread* thread,
                             ThreadType thr_type,
                             size_t stack_size = 0);
+
+  // The "main thread", also known as "starting thread", is the thread
+  // that loads/creates the JVM via JNI_CreateJavaVM.
   static bool create_main_thread(JavaThread* thread);
+
+  // The primordial thread is the initial process thread. The java
+  // launcher never uses the primordial thread as the main thread, but
+  // applications that host the JVM directly may do so. Some platforms
+  // need special-case handling of the primordial thread if it attaches
+  // to the VM.
+  static bool is_primordial_thread(void)
+#if defined(_WINDOWS) || defined(BSD)
+    // No way to identify the primordial thread.
+    { return false; }
+#else
+  ;
+#endif
+
   static bool create_attached_thread(JavaThread* thread);
   static void pd_start_thread(Thread* thread);
   static void start_thread(Thread* thread);
@@ -502,7 +527,7 @@ class os: AllStatic {
   static char* do_you_want_to_debug(const char* message);
 
   // run cmd in a separate process and return its exit code; or -1 on failures
-  static int fork_and_exec(char *cmd);
+  static int fork_and_exec(char *cmd, bool use_vfork_if_available = false);
 
   // os::exit() is merged with vm_exit()
   // static void exit(int num);
@@ -536,8 +561,7 @@ class os: AllStatic {
 
   // Reading directories.
   static DIR*           opendir(const char* dirname);
-  static int            readdir_buf_size(const char *path);
-  static struct dirent* readdir(DIR* dirp, dirent* dbuf);
+  static struct dirent* readdir(DIR* dirp);
   static int            closedir(DIR* dirp);
 
   // Dynamic library extension
@@ -591,6 +615,9 @@ class os: AllStatic {
   static void *find_agent_function(AgentLibrary *agent_lib, bool check_lib,
                                    const char *syms[], size_t syms_len);
 
+  static int vsnprintf(char* buf, size_t len, const char* fmt, va_list args) ATTRIBUTE_PRINTF(3, 0);
+  static int snprintf(char* buf, size_t len, const char* fmt, ...) ATTRIBUTE_PRINTF(3, 4);
+
   // Print out system information; they are called by fatal error handler.
   // Output format may be different on different platforms.
   static void print_os_info(outputStream* st);
@@ -604,7 +631,7 @@ class os: AllStatic {
   static void print_register_info(outputStream* st, void* context);
   static void print_siginfo(outputStream* st, void* siginfo);
   static void print_signal_handlers(outputStream* st, char* buf, size_t buflen);
-  static void print_date_and_time(outputStream* st);
+  static void print_date_and_time(outputStream* st, char* buf, size_t buflen);
 
   static void print_location(outputStream* st, intptr_t x, bool verbose = false);
   static size_t lasterror(char *buf, size_t len);
@@ -825,6 +852,15 @@ class os: AllStatic {
 #ifdef TARGET_OS_ARCH_linux_zero
 # include "os_linux_zero.hpp"
 #endif
+#ifdef TARGET_OS_ARCH_linux_arm
+# include "os_linux_arm.hpp"
+#endif
+#ifdef TARGET_OS_ARCH_linux_ppc
+# include "os_linux_ppc.hpp"
+#endif
+#ifdef TARGET_OS_ARCH_linux_aarch32
+# include "os_linux_aarch32.hpp"
+#endif
 #ifdef TARGET_OS_ARCH_solaris_x86
 # include "os_solaris_x86.hpp"
 #endif
@@ -833,12 +869,6 @@ class os: AllStatic {
 #endif
 #ifdef TARGET_OS_ARCH_windows_x86
 # include "os_windows_x86.hpp"
-#endif
-#ifdef TARGET_OS_ARCH_linux_arm
-# include "os_linux_arm.hpp"
-#endif
-#ifdef TARGET_OS_ARCH_linux_ppc
-# include "os_linux_ppc.hpp"
 #endif
 #ifdef TARGET_OS_ARCH_aix_ppc
 # include "os_aix_ppc.hpp"

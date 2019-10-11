@@ -165,7 +165,7 @@ Method* Klass::uncached_lookup_method(Symbol* name, Symbol* signature, OverpassL
 
 void* Klass::operator new(size_t size, ClassLoaderData* loader_data, size_t word_size, TRAPS) throw() {
   return Metaspace::allocate(loader_data, word_size, /*read_only*/false,
-                             MetaspaceObj::ClassType, CHECK_NULL);
+                             MetaspaceObj::ClassType, THREAD);
 }
 
 Klass::Klass() {
@@ -468,6 +468,12 @@ void Klass::clean_weak_klass_links(BoolObjectClosure* is_alive, bool clean_alive
     if (clean_alive_klasses && current->oop_is_instance()) {
       InstanceKlass* ik = InstanceKlass::cast(current);
       ik->clean_weak_instanceklass_links(is_alive);
+
+      // JVMTI RedefineClasses creates previous versions that are not in
+      // the class hierarchy, so process them here.
+      while ((ik = ik->previous_versions()) != NULL) {
+        ik->clean_weak_instanceklass_links(is_alive);
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -117,6 +117,7 @@ public class WhiteBox {
   public native void NMTUncommitMemory(long addr, long size);
   public native void NMTReleaseMemory(long addr, long size);
   public native long NMTMallocWithPseudoStack(long size, int index);
+  public native long NMTMallocWithPseudoStackAndType(long size, int index, int type);
   public native boolean NMTIsDetailSupported();
   public native boolean NMTChangeTrackingLevel();
   public native int NMTGetHashSize();
@@ -161,6 +162,7 @@ public class WhiteBox {
   }
   public native boolean enqueueMethodForCompilation(Executable method, int compLevel, int entry_bci);
   public native void    clearMethodState(Executable method);
+  public native void    markMethodProfiled(Executable method);
   public native int     getMethodEntryBci(Executable method);
   public native Object[] getNMethod(Executable method, boolean isOsr);
 
@@ -235,4 +237,12 @@ public class WhiteBox {
 
   // Class Data Sharing
   public native boolean isSharedClass(Class<?> c);
+
+  // Returns true on linux if library has the noexecstack flag set.
+  public native boolean checkLibSpecifiesNoexecstack(String libfilename);
+
+  // Container testing
+  public native boolean isContainerized();
+  public native void printOsInfo();
+
 }

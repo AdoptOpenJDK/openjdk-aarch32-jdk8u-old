@@ -52,17 +52,22 @@ LIBJSIG_MAPFILE = $(MAKEFILES_DIR)/mapfile-vers-jsig
 # cause problems with interposing. See CR: 6466665
 # LFLAGS_JSIG += $(MAPFLAG:FILENAME=$(LIBJSIG_MAPFILE))
 
-LFLAGS_JSIG += -D_GNU_SOURCE -pthread $(LDFLAGS_HASH_STYLE)
+LFLAGS_JSIG += -D_GNU_SOURCE -pthread $(LDFLAGS_HASH_STYLE) $(EXTRA_LDFLAGS)
 
 # DEBUG_BINARIES overrides everything, use full -g debug information
 ifeq ($(DEBUG_BINARIES), true)
   JSIG_DEBUG_CFLAGS = -g
 endif
 
+# Optimize jsig lib at level -O3 unless it's a slowdebug build
+ifneq ($(DEBUG_LEVEL), slowdebug)
+  JSIG_OPT_FLAGS = $(OPT_CFLAGS)
+endif
+
 $(LIBJSIG): $(JSIGSRCDIR)/jsig.c $(LIBJSIG_MAPFILE)
 	@echo Making signal interposition lib...
 	$(QUIETLY) $(CC) $(SYMFLAG) $(ARCHFLAG) $(SHARED_FLAG) $(PICFLAG) \
-                         $(LFLAGS_JSIG) $(JSIG_DEBUG_CFLAGS) -o $@ $<
+                         $(LFLAGS_JSIG) $(JSIG_DEBUG_CFLAGS) $(JSIG_OPT_FLAGS) $(EXTRA_CFLAGS) -o $@ $<
 ifeq ($(ENABLE_FULL_DEBUG_SYMBOLS),1)
   ifeq ($(OS_VENDOR), Darwin)
 	$(DSYMUTIL) $@

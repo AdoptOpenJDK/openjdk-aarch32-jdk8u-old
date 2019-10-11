@@ -45,6 +45,7 @@
 #include "runtime/arguments.hpp"
 #include "runtime/biasedLocking.hpp"
 #include "runtime/compilationPolicy.hpp"
+#include "runtime/deoptimization.hpp"
 #include "runtime/fprofiler.hpp"
 #include "runtime/init.hpp"
 #include "runtime/interfaceSupport.hpp"
@@ -78,6 +79,9 @@
 #endif
 #ifdef TARGET_ARCH_ppc
 # include "vm_version_ppc.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "vm_version_aarch32.hpp"
 #endif
 #if INCLUDE_ALL_GCS
 #include "gc_implementation/concurrentMarkSweep/concurrentMarkSweepThread.hpp"

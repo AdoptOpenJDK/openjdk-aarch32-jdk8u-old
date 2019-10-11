@@ -453,6 +453,9 @@ static Node* split_if(IfNode *iff, PhaseIterGVN *igvn) {
 // offset.  Return 2 if we had to negate the test.  Index is NULL if the check
 // is versus a constant.
 int IfNode::is_range_check(Node* &range, Node* &index, jint &offset) {
+  if (outcnt() != 2) {
+    return 0;
+  }
   Node* b = in(1);
   if (b == NULL || !b->is_Bool())  return 0;
   BoolNode* bn = b->as_Bool();
@@ -598,7 +601,7 @@ Node* IfNode::up_one_dom(Node *curr, bool linear_only) {
     if( din4->is_Call() &&      // Handle a slow-path call on either arm
         (din4 = din4->in(0)) )
       din4 = din4->in(0);
-    if( din3 == din4 && din3->is_If() )
+    if (din3 != NULL && din3 == din4 && din3->is_If()) // Regions not degraded to a copy
       return din3;              // Skip around diamonds
   }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -21,44 +21,37 @@
  * questions.
  */
 
-/*
+/**
  * @test
- * @bug 6904403
- * @summary Don't assert if we redefine finalize method
- * @library /testlibrary
- * @build RedefineClassHelper
- * @run main RedefineClassHelper
- * @run main/othervm -javaagent:redefineagent.jar RedefineFinalizer
+ * @bug 8219807
+ * @summary Test IfNode::up_one_dom() with dead regions.
+ * @compile -XDstringConcat=inline TestIfWithDeadRegion.java
+ * @run main/othervm -XX:CompileCommand=compileonly,compiler.c2.TestIfWithDeadRegion::test
+ *                   compiler.c2.TestIfWithDeadRegion
  */
 
-/*
- * Regression test for hitting:
- *
- * assert(f == k->has_finalizer()) failed: inconsistent has_finalizer
- *
- * when redefining finalizer method
- */
-public class RedefineFinalizer {
+package compiler.c2;
 
-    public static String newB =
-                "class RedefineFinalizer$B {" +
-                "   protected void finalize() { " +
-                "       System.out.println(\"Finalizer called\");" +
-                "   }" +
-                "}";
+import java.util.function.Supplier;
 
-    public static void main(String[] args) throws Exception {
-        RedefineClassHelper.redefineClass(B.class, newB);
+public class TestIfWithDeadRegion {
 
-        A a = new A();
+    static String msg;
+
+    static String getString(String s, int i) {
+        String current = s + String.valueOf(i);
+        System.nanoTime();
+        return current;
     }
 
-    static class A extends B {
+    static void test(Supplier<String> supplier) {
+        msg = supplier.get();
     }
 
-    static class B {
-        protected void finalize() {
-            // should be empty
+    public static void main(String[] args) {
+        for (int i = 0; i < 20_000; ++i) {
+            test(() -> getString("Test1", 42));
+            test(() -> getString("Test2", 42));
         }
     }
 }

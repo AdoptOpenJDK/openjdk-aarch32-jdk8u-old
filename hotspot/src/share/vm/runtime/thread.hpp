@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -51,10 +51,8 @@
 #include "gc_implementation/g1/dirtyCardQueue.hpp"
 #include "gc_implementation/g1/satbQueue.hpp"
 #endif // INCLUDE_ALL_GCS
-#ifdef ZERO
 #ifdef TARGET_ARCH_zero
 # include "stack_zero.hpp"
-#endif
 #endif
 
 class ThreadSafepointState;
@@ -1714,6 +1712,15 @@ public:
 #ifdef TARGET_OS_ARCH_linux_zero
 # include "thread_linux_zero.hpp"
 #endif
+#ifdef TARGET_OS_ARCH_linux_arm
+# include "thread_linux_arm.hpp"
+#endif
+#ifdef TARGET_OS_ARCH_linux_ppc
+# include "thread_linux_ppc.hpp"
+#endif
+#ifdef TARGET_OS_ARCH_linux_aarch32
+# include "thread_linux_aarch32.hpp"
+#endif
 #ifdef TARGET_OS_ARCH_solaris_x86
 # include "thread_solaris_x86.hpp"
 #endif
@@ -1722,12 +1729,6 @@ public:
 #endif
 #ifdef TARGET_OS_ARCH_windows_x86
 # include "thread_windows_x86.hpp"
-#endif
-#ifdef TARGET_OS_ARCH_linux_arm
-# include "thread_linux_arm.hpp"
-#endif
-#ifdef TARGET_OS_ARCH_linux_ppc
-# include "thread_linux_ppc.hpp"
 #endif
 #ifdef TARGET_OS_ARCH_aix_ppc
 # include "thread_aix_ppc.hpp"
@@ -1801,7 +1802,8 @@ inline bool JavaThread::stack_yellow_zone_disabled() {
 
 inline bool JavaThread::stack_yellow_zone_enabled() {
 #ifdef ASSERT
-  if (os::uses_stack_guard_pages()) {
+  if (os::uses_stack_guard_pages() &&
+      !(DisablePrimordialThreadGuardPages && os::is_primordial_thread())) {
     assert(_stack_guard_state != stack_guard_unused, "guard pages must be in use");
   }
 #endif
