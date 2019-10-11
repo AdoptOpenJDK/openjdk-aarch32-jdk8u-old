@@ -121,7 +121,7 @@ public class TCPTransport extends Transport {
 
     private static final boolean disableIncomingHttp =
         java.security.AccessController.doPrivileged(
-            new GetPropertyAction("java.rmi.server.disableIncomingHttp", "true"))
+            new GetPropertyAction("sun.rmi.server.disableIncomingHttp", "true"))
                 .equalsIgnoreCase("true");
 
     /** total connections handled */
@@ -727,7 +727,6 @@ public class TCPTransport extends Transport {
                 int magic = in.readInt();
 
                 if (magic == POST) {
-                    System.err.println("DISABLED: " + disableIncomingHttp);
                     if (disableIncomingHttp) {
                         throw new RemoteException("RMI over HTTP is disabled");
                     }

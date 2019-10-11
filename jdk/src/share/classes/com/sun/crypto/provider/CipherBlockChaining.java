@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,7 @@ package com.sun.crypto.provider;
 
 import java.security.InvalidKeyException;
 import java.security.ProviderException;
-
+import java.util.Objects;
 
 /**
  * This class represents ciphers in cipher block chaining (CBC) mode.
@@ -138,18 +138,24 @@ class CipherBlockChaining extends FeedbackCipher  {
      * @return the length of the encrypted data
      */
     int encrypt(byte[] plain, int plainOffset, int plainLen,
-                byte[] cipher, int cipherOffset)
-    {
+                byte[] cipher, int cipherOffset) {
         if (plainLen <= 0) {
             return plainLen;
         }
-        if ((plainLen % blockSize) != 0) {
-            throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(plainLen, blockSize);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, plainLen);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, plainLen);
+        return implEncrypt(plain, plainOffset, plainLen,
+                           cipher, cipherOffset);
+    }
+
+    private int implEncrypt(byte[] plain, int plainOffset, int plainLen,
+                            byte[] cipher, int cipherOffset)
+    {
         int endIndex = plainOffset + plainLen;
 
         for (; plainOffset < endIndex;
-             plainOffset+=blockSize, cipherOffset += blockSize) {
+             plainOffset += blockSize, cipherOffset += blockSize) {
             for (int i = 0; i < blockSize; i++) {
                 k[i] = (byte)(plain[i + plainOffset] ^ r[i]);
             }
@@ -182,14 +188,19 @@ class CipherBlockChaining extends FeedbackCipher  {
      * @return the length of the decrypted data
      */
     int decrypt(byte[] cipher, int cipherOffset, int cipherLen,
-                byte[] plain, int plainOffset)
-    {
+                byte[] plain, int plainOffset) {
         if (cipherLen <= 0) {
             return cipherLen;
         }
-        if ((cipherLen % blockSize) != 0) {
-            throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(cipherLen, blockSize);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, cipherLen);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, cipherLen);
+        return implDecrypt(cipher, cipherOffset, cipherLen, plain, plainOffset);
+    }
+
+    private int implDecrypt(byte[] cipher, int cipherOffset, int cipherLen,
+                            byte[] plain, int plainOffset)
+    {
         int endIndex = cipherOffset + cipherLen;
 
         for (; cipherOffset < endIndex;

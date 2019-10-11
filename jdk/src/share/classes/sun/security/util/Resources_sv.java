@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -36,7 +36,7 @@ public class Resources_sv extends java.util.ListResourceBundle {
 
         // javax.security.auth.PrivateCredentialPermission
         {"invalid.null.input.s.", "ogiltiga null-indata"},
-        {"actions.can.only.be.read.", "funktioner kan endast 'l\u00E4sas'"},
+        {"actions.can.only.be.read.", "\u00E5tg\u00E4rder kan endast 'l\u00E4sas'"},
         {"permission.name.name.syntax.invalid.",
                 "syntaxen f\u00F6r beh\u00F6righetsnamnet [{0}] \u00E4r ogiltig: "},
         {"Credential.Class.not.followed.by.a.Principal.Class.and.Name",
@@ -67,10 +67,10 @@ public class Resources_sv extends java.util.ListResourceBundle {
         {".Principal.", "\tIdentitetshavare: "},
         {".Public.Credential.", "\tOffentlig inloggning: "},
         {".Private.Credentials.inaccessible.",
-                "\tPrivat inloggning \u00E4r inte tillg\u00E4nglig\n"},
+                "\tPrivat inloggning \u00E4r inte m\u00F6jlig\n"},
         {".Private.Credential.", "\tPrivat inloggning: "},
         {".Private.Credential.inaccessible.",
-                "\tPrivat inloggning \u00E4r inte tillg\u00E4nglig\n"},
+                "\tPrivat inloggning \u00E4r inte m\u00F6jlig\n"},
         {"Subject.is.read.only", "Innehavare \u00E4r skrivskyddad"},
         {"attempting.to.add.an.object.which.is.not.an.instance.of.java.security.Principal.to.a.Subject.s.Principal.Set",
                 "f\u00F6rs\u00F6k att l\u00E4gga till ett objekt som inte \u00E4r en instans av java.security.Principal till ett subjekts upps\u00E4ttning av identitetshavare"},

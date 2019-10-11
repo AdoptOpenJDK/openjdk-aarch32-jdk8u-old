@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ import java.io.*;
 import java.security.*;
 import javax.crypto.*;
 import static com.sun.crypto.provider.AESConstants.AES_BLOCK_SIZE;
+
 
 /**
  * This class represents ciphers in GaloisCounter (GCM) mode.
@@ -406,8 +407,8 @@ final class GaloisCounterMode extends FeedbackCipher {
     /**
      * Performs encryption operation.
      *
-     * <p>The input plain text <code>in</code>, starting at <code>inOff</code>
-     * and ending at <code>(inOff + len - 1)</code>, is encrypted. The result
+     * <p>The input plain text <code>in</code>, starting at <code>inOfs</code>
+     * and ending at <code>(inOfs + len - 1)</code>, is encrypted. The result
      * is stored in <code>out</code>, starting at <code>outOfs</code>.
      *
      * @param in the buffer with the input data to be encrypted
@@ -422,15 +423,18 @@ final class GaloisCounterMode extends FeedbackCipher {
     int encrypt(byte[] in, int inOfs, int len, byte[] out, int outOfs) {
         checkDataLength(processed, len);
 
-        if ((len % blockSize) != 0) {
-             throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(len, blockSize);
         processAAD();
+
         if (len > 0) {
+            RangeUtil.nullAndBoundsCheck(in, inOfs, len);
+            RangeUtil.nullAndBoundsCheck(out, outOfs, len);
+
             gctrPAndC.update(in, inOfs, len, out, outOfs);
             processed += len;
             ghashAllToS.update(out, outOfs, len);
         }
+
         return len;
     }
 
@@ -450,7 +454,10 @@ final class GaloisCounterMode extends FeedbackCipher {
             throw new ShortBufferException
                 ("Can't fit both data and tag into one buffer");
         }
-        if (out.length - outOfs < (len + tagLenBytes)) {
+        try {
+            RangeUtil.nullAndBoundsCheck(out, outOfs,
+                (len + tagLenBytes));
+        } catch (ArrayIndexOutOfBoundsException aiobe) {
             throw new ShortBufferException("Output buffer too small");
         }
 
@@ -458,6 +465,8 @@ final class GaloisCounterMode extends FeedbackCipher {
 
         processAAD();
         if (len > 0) {
+            RangeUtil.nullAndBoundsCheck(in, inOfs, len);
+
             doLastBlock(in, inOfs, len, out, outOfs, true);
         }
 
@@ -493,15 +502,14 @@ final class GaloisCounterMode extends FeedbackCipher {
     int decrypt(byte[] in, int inOfs, int len, byte[] out, int outOfs) {
         checkDataLength(ibuffer.size(), len);
 
-        if ((len % blockSize) != 0) {
-             throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(len, blockSize);
         processAAD();
 
         if (len > 0) {
             // store internally until decryptFinal is called because
             // spec mentioned that only return recovered data after tag
             // is successfully verified
+            RangeUtil.nullAndBoundsCheck(in, inOfs, len);
             ibuffer.write(in, inOfs, len);
         }
         return 0;
@@ -530,22 +538,28 @@ final class GaloisCounterMode extends FeedbackCipher {
         if (len < tagLenBytes) {
             throw new AEADBadTagException("Input too short - need tag");
         }
+
         // do this check here can also catch the potential integer overflow
         // scenario for the subsequent output buffer capacity check.
         checkDataLength(ibuffer.size(), (len - tagLenBytes));
 
-        if (out.length - outOfs < ((ibuffer.size() + len) - tagLenBytes)) {
+        try {
+            RangeUtil.nullAndBoundsCheck(out, outOfs,
+                (ibuffer.size() + len) - tagLenBytes);
+        } catch (ArrayIndexOutOfBoundsException aiobe) {
             throw new ShortBufferException("Output buffer too small");
         }
 
         processAAD();
+
+        RangeUtil.nullAndBoundsCheck(in, inOfs, len);
 
         // get the trailing tag bytes from 'in'
         byte[] tag = new byte[tagLenBytes];
         System.arraycopy(in, inOfs + len - tagLenBytes, tag, 0, tagLenBytes);
         len -= tagLenBytes;
 
-        if (len != 0) {
+        if (len > 0) {
             ibuffer.write(in, inOfs, len);
         }
 

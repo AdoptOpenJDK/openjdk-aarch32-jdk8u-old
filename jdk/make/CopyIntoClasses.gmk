@@ -179,22 +179,12 @@ else
   ALL_META-INF_DIRS := $(ALL_META-INF_DIRS_share)
 endif
 
-ifndef OPENJDK
-  ALL_META-INF_DIRS += $(JDK_TOPDIR)/src/closed/share/classes/sun/java2d/cmm/kcms/META-INF
-endif
-
 SRC_SERVICES_FILES := $(wildcard $(addsuffix /services/*, $(ALL_META-INF_DIRS)))
 
 ifdef OPENJDK
   SRC_SERVICES_FILES := $(filter-out %sun/dc/META-INF/services/sun.java2d.pipe.RenderingEngine, $(SRC_SERVICES_FILES))
-  SRC_SERVICES_FILES := $(filter-out %sun/java2d/cmm/kcms/META-INF/services/sun.java2d.cmm.CMMServiceProvider, $(SRC_SERVICES_FILES))
 else
   SRC_SERVICES_FILES := $(filter-out %sun/java2d/pisces/META-INF/services/sun.java2d.pipe.RenderingEngine, $(SRC_SERVICES_FILES))
-  ifeq ($(OPENJDK_TARGET_OS)-$(OPENJDK_TARGET_CPU_ARCH), linux-sparc)
-    SRC_SERVICES_FILES := $(filter-out %sun/java2d/cmm/kcms/META-INF/services/sun.java2d.cmm.CMMServiceProvider, $(SRC_SERVICES_FILES))
-  else
-    SRC_SERVICES_FILES := $(filter-out %sun/java2d/cmm/lcms/META-INF/services/sun.java2d.cmm.CMMServiceProvider, $(SRC_SERVICES_FILES))
-  endif
 endif
 
 # The number of services files are relatively few. If the increase in numbers, then
@@ -205,9 +195,9 @@ OUT_SERVICES_FILES := $(addprefix $(JDK_OUTPUTDIR)/classes/META-INF/services/, \
     $(shell $(PRINTF) "$(SRC_SERVICES_FILES)\n" | $(SED) -e 's|/[^ ]*/META-INF/services/||g'))
 OUT_SERVICES_FILES_COLON := $(addsuffix :, $(OUT_SERVICES_FILES))
 # Exception handling for print services with no META-INF directory
-SRC_SERVICES_FILES_PRINT = $(wildcard $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/classes/sun/print/services/*)
+SRC_SERVICES_FILES_PRINT = $(wildcard $(JDK_TOPDIR)/src/share/classes/sun/print/services/*)
 OUT_SERVICES_FILES_PRINT = $(addprefix $(JDK_OUTPUTDIR)/classes/META-INF/services/, \
-    $(patsubst $(JDK_TOPDIR)/src/$(OPENJDK_TARGET_OS_API_DIR)/classes/sun/print/services/%, %, \
+    $(patsubst $(JDK_TOPDIR)/src/share/classes/sun/print/services/%, %, \
     $(SRC_SERVICES_FILES_PRINT)))
 OUT_SERVICES_FILES_PRINT_COLON = $(addsuffix :, $(OUT_SERVICES_FILES_PRINT))
 RULES_SERVICES_PRINT = $(join $(OUT_SERVICES_FILES_PRINT_COLON), $(SRC_SERVICES_FILES_PRINT))

@@ -53,6 +53,11 @@ public abstract class SSLContextImpl extends SSLContextSpi {
     private X509TrustManager trustManager;
     private SecureRandom secureRandom;
 
+    private final static Collection<CipherSuite> clientCustomizedCipherSuites =
+            getCustomizedCipherSuites("jdk.tls.client.cipherSuites");
+    private final static Collection<CipherSuite> serverCustomizedCipherSuites =
+            getCustomizedCipherSuites("jdk.tls.server.cipherSuites");
+
     SSLContextImpl() {
         ephemeralKeyManager = new EphemeralKeyManager();
         clientCache = new SSLSessionContextImpl();
@@ -279,19 +284,50 @@ public abstract class SSLContextImpl extends SSLContextSpi {
     }
 
     /*
-     * Return the list of all available CipherSuites with a priority of
-     * minPriority or above.
+     * Return the list of all available CipherSuites that are supported
+     * using currently installed providers.
      */
-    private static CipherSuiteList getApplicableCipherSuiteList(
-            ProtocolList protocols, boolean onlyEnabled) {
+    private static CipherSuiteList getApplicableSupportedCipherSuiteList(
+            ProtocolList protocols) {
 
-        int minPriority = CipherSuite.SUPPORTED_SUITES_PRIORITY;
-        if (onlyEnabled) {
-            minPriority = CipherSuite.DEFAULT_SUITES_PRIORITY;
+        return getApplicableCipherSuiteList(
+                CipherSuite.allowedCipherSuites(),
+                protocols, CipherSuite.SUPPORTED_SUITES_PRIORITY);
+    }
+
+    /*
+     * Return the list of all available CipherSuites that are default enabled
+     * in client or server side.
+     */
+    private static CipherSuiteList getApplicableEnabledCipherSuiteList(
+            ProtocolList protocols, boolean isClient) {
+
+        if (isClient) {
+            if (!clientCustomizedCipherSuites.isEmpty()) {
+                return getApplicableCipherSuiteList(
+                        clientCustomizedCipherSuites,
+                        protocols, CipherSuite.SUPPORTED_SUITES_PRIORITY);
+            }
+        } else {
+            if (!serverCustomizedCipherSuites.isEmpty()) {
+                return getApplicableCipherSuiteList(
+                        serverCustomizedCipherSuites,
+                        protocols, CipherSuite.SUPPORTED_SUITES_PRIORITY);
+            }
         }
 
-        Collection<CipherSuite> allowedCipherSuites =
-                                    CipherSuite.allowedCipherSuites();
+        return getApplicableCipherSuiteList(
+                CipherSuite.allowedCipherSuites(),
+                protocols, CipherSuite.DEFAULT_SUITES_PRIORITY);
+    }
+
+    /*
+     * Return the list of available CipherSuites which are applicable to
+     * the specified protocols.
+     */
+    private static CipherSuiteList getApplicableCipherSuiteList(
+            Collection<CipherSuite> allowedCipherSuites,
+            ProtocolList protocols, int minPriority) {
 
         TreeSet<CipherSuite> suites = new TreeSet<>();
         if (!(protocols.collection().isEmpty()) &&
@@ -308,6 +344,13 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                             EnumSet.of(CryptoPrimitive.KEY_AGREEMENT),
                             suite.name, null)) {
                         suites.add(suite);
+                    } else {
+                        if (debug != null && Debug.isOn("sslctx") &&
+                                Debug.isOn("verbose")) {
+                            System.out.println(
+                                    "Ignoring disabled cipher suite: " +
+                                            suite.name);
+                        }
                     }
                 } else if (debug != null &&
                         Debug.isOn("sslctx") && Debug.isOn("verbose")) {
@@ -326,6 +369,67 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         }
 
         return new CipherSuiteList(suites);
+    }
+
+    /*
+     * Get the customized cipher suites specified by the given system property.
+     */
+    private static Collection<CipherSuite> getCustomizedCipherSuites(
+            String propertyName) {
+
+        String property = AccessController.doPrivileged(
+                    new GetPropertyAction(propertyName));
+        if (debug != null && Debug.isOn("sslctx")) {
+            System.out.println(
+                    "System property " + propertyName + " is set to '" +
+                    property + "'");
+        }
+        if (property != null && property.length() != 0) {
+            // remove double quote marks from beginning/end of the property
+            if (property.length() > 1 && property.charAt(0) == '"' &&
+                    property.charAt(property.length() - 1) == '"') {
+                property = property.substring(1, property.length() - 1);
+            }
+        }
+
+        if (property != null && property.length() != 0) {
+            String[] cipherSuiteNames = property.split(",");
+            Collection<CipherSuite> cipherSuites =
+                        new ArrayList<>(cipherSuiteNames.length);
+            for (int i = 0; i < cipherSuiteNames.length; i++) {
+                cipherSuiteNames[i] = cipherSuiteNames[i].trim();
+                if (cipherSuiteNames[i].isEmpty()) {
+                    continue;
+                }
+
+                CipherSuite suite;
+                try {
+                    suite = CipherSuite.valueOf(cipherSuiteNames[i]);
+                } catch (IllegalArgumentException iae) {
+                    if (debug != null && Debug.isOn("sslctx")) {
+                        System.out.println(
+                                "Unknown or unsupported cipher suite name: " +
+                                cipherSuiteNames[i]);
+                    }
+
+                    continue;
+                }
+
+                if (suite.isAvailable()) {
+                    cipherSuites.add(suite);
+                } else {
+                    if (debug != null && Debug.isOn("sslctx")) {
+                        System.out.println(
+                                "The current installed providers do not " +
+                                "support cipher suite: " + cipherSuiteNames[i]);
+                    }
+                }
+            }
+
+            return cipherSuites;
+        }
+
+        return Collections.emptyList();
     }
 
     private static String[] getAvailableProtocols(
@@ -422,10 +526,10 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                 }));
             }
 
-            supportedCipherSuiteList = getApplicableCipherSuiteList(
-                    supportedProtocolList, false);          // all supported
-            serverDefaultCipherSuiteList = getApplicableCipherSuiteList(
-                    serverDefaultProtocolList, true);       // enabled only
+            supportedCipherSuiteList = getApplicableSupportedCipherSuiteList(
+                    supportedProtocolList);
+            serverDefaultCipherSuiteList = getApplicableEnabledCipherSuiteList(
+                    serverDefaultProtocolList, false);
         }
 
         @Override
@@ -482,8 +586,8 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                 }));
             }
 
-            clientDefaultCipherSuiteList = getApplicableCipherSuiteList(
-                    clientDefaultProtocolList, true);       // enabled only
+            clientDefaultCipherSuiteList = getApplicableEnabledCipherSuiteList(
+                    clientDefaultProtocolList, true);
         }
 
         @Override
@@ -522,8 +626,9 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                 }));
             }
 
-            clientDefaultCipherSuiteList = getApplicableCipherSuiteList(
-                    clientDefaultProtocolList, true);       // enabled only
+            clientDefaultCipherSuiteList = getApplicableEnabledCipherSuiteList(
+                    clientDefaultProtocolList, true);
+
         }
 
         @Override
@@ -564,8 +669,8 @@ public abstract class SSLContextImpl extends SSLContextSpi {
                 }));
             }
 
-            clientDefaultCipherSuiteList = getApplicableCipherSuiteList(
-                    clientDefaultProtocolList, true);       // enabled only
+            clientDefaultCipherSuiteList = getApplicableEnabledCipherSuiteList(
+                    clientDefaultProtocolList, true);
         }
 
         @Override
@@ -696,8 +801,9 @@ public abstract class SSLContextImpl extends SSLContextSpi {
 
                 clientDefaultProtocolList = new ProtocolList(
                         getAvailableProtocols(candidates));
-                clientDefaultCipherSuiteList = getApplicableCipherSuiteList(
-                        clientDefaultProtocolList, true);   // enabled only
+                clientDefaultCipherSuiteList =
+                        getApplicableEnabledCipherSuiteList(
+                                clientDefaultProtocolList, true);
             } else {
                 clientDefaultProtocolList = null;       // unlikely to be used
                 clientDefaultCipherSuiteList = null;    // unlikely to be used
@@ -767,12 +873,20 @@ public abstract class SSLContextImpl extends SSLContextSpi {
         }
 
         private static TrustManager[] getTrustManagers() throws Exception {
-            KeyStore ks =
-                TrustManagerFactoryImpl.getCacertsKeyStore("defaultctx");
-
             TrustManagerFactory tmf = TrustManagerFactory.getInstance(
-                TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(ks);
+                    TrustManagerFactory.getDefaultAlgorithm());
+            if ("SunJSSE".equals(tmf.getProvider().getName())) {
+                // The implementation will load the default KeyStore
+                // automatically.  Cached trust materials may be used
+                // for performance improvement.
+                tmf.init((KeyStore)null);
+            } else {
+                // Use the explicitly specified KeyStore for third party's
+                // TrustManagerFactory implementation.
+                KeyStore ks = TrustStoreManager.getTrustedKeyStore();
+                tmf.init(ks);
+            }
+
             return tmf.getTrustManagers();
         }
 
@@ -1000,8 +1114,9 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
         checkAdditionalTrust(chain, authType, engine, false);
     }
 
-    private void checkAdditionalTrust(X509Certificate[] chain, String authType,
-                Socket socket, boolean isClient) throws CertificateException {
+    private void checkAdditionalTrust(X509Certificate[] chain,
+            String authType, Socket socket,
+            boolean checkClientTrusted) throws CertificateException {
         if (socket != null && socket.isConnected() &&
                                     socket instanceof SSLSocket) {
 
@@ -1015,9 +1130,8 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
             String identityAlg = sslSocket.getSSLParameters().
                                         getEndpointIdentificationAlgorithm();
             if (identityAlg != null && identityAlg.length() != 0) {
-                String hostname = session.getPeerHost();
-                X509TrustManagerImpl.checkIdentity(
-                                    hostname, chain[0], identityAlg);
+                X509TrustManagerImpl.checkIdentity(session, chain,
+                                    identityAlg, checkClientTrusted);
             }
 
             // try the best to check the algorithm constraints
@@ -1041,12 +1155,13 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
                 constraints = new SSLAlgorithmConstraints(sslSocket, true);
             }
 
-            checkAlgorithmConstraints(chain, constraints, isClient);
+            checkAlgorithmConstraints(chain, constraints, checkClientTrusted);
         }
     }
 
-    private void checkAdditionalTrust(X509Certificate[] chain, String authType,
-            SSLEngine engine, boolean isClient) throws CertificateException {
+    private void checkAdditionalTrust(X509Certificate[] chain,
+            String authType, SSLEngine engine,
+            boolean checkClientTrusted) throws CertificateException {
         if (engine != null) {
             SSLSession session = engine.getHandshakeSession();
             if (session == null) {
@@ -1057,9 +1172,8 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
             String identityAlg = engine.getSSLParameters().
                                         getEndpointIdentificationAlgorithm();
             if (identityAlg != null && identityAlg.length() != 0) {
-                String hostname = session.getPeerHost();
-                X509TrustManagerImpl.checkIdentity(
-                                    hostname, chain[0], identityAlg);
+                X509TrustManagerImpl.checkIdentity(session, chain,
+                                    identityAlg, checkClientTrusted);
             }
 
             // try the best to check the algorithm constraints
@@ -1083,12 +1197,13 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
                 constraints = new SSLAlgorithmConstraints(engine, true);
             }
 
-            checkAlgorithmConstraints(chain, constraints, isClient);
+            checkAlgorithmConstraints(chain, constraints, checkClientTrusted);
         }
     }
 
     private void checkAlgorithmConstraints(X509Certificate[] chain,
-            AlgorithmConstraints constraints, boolean isClient) throws CertificateException {
+            AlgorithmConstraints constraints,
+            boolean checkClientTrusted) throws CertificateException {
 
         try {
             // Does the certificate chain end with a trusted certificate?
@@ -1108,7 +1223,8 @@ final class AbstractTrustManagerWrapper extends X509ExtendedTrustManager
             if (checkedLength >= 0) {
                 AlgorithmChecker checker =
                         new AlgorithmChecker(constraints, null,
-                                (isClient ? Validator.VAR_TLS_CLIENT : Validator.VAR_TLS_SERVER));
+                                (checkClientTrusted ? Validator.VAR_TLS_CLIENT :
+                                            Validator.VAR_TLS_SERVER));
                 checker.init(false);
                 for (int i = checkedLength; i >= 0; i--) {
                     Certificate cert = chain[i];

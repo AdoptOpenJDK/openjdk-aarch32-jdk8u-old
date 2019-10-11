@@ -247,16 +247,37 @@ endif
 
 ##########################################################################################
 
-# Copy msvcrXX.dll on windows
-
+# Copy the microsoft runtime libraries on windows
 ifeq ($(OPENJDK_TARGET_OS), windows)
-  MSVCR_TARGET := $(JDK_OUTPUTDIR)/bin/$(notdir $(MSVCR_DLL))
-  # Chmod to avoid permission issues if bundles are unpacked on unix platforms.
-  $(MSVCR_TARGET): $(MSVCR_DLL)
-	$(call install-file)
-	$(CHMOD) a+rx $@
 
-  COPY_FILES += $(MSVCR_TARGET)
+  # Chmod to avoid permission issues if bundles are unpacked on unix platforms.
+  define copy-and-chmod
+	$(install-file)
+	$(CHMOD) a+rx $@
+  endef
+
+  # Use separate macro calls in case the source files are not in the same
+  # directory.
+  $(eval $(call SetupCopyFiles,COPY_MSVCR, \
+      DEST := $(JDK_OUTPUTDIR)/bin, \
+      FILES := $(MSVCR_DLL), \
+      MACRO := copy-and-chmod))
+
+  $(eval $(call SetupCopyFiles,COPY_MSVCP, \
+      DEST := $(JDK_OUTPUTDIR)/bin, \
+      FILES := $(MSVCP_DLL), \
+      MACRO := copy-and-chmod))
+
+  COPY_FILES += $(COPY_MSVCR) $(COPY_MSVCP)
+
+  ifneq ($(UCRT_DLL_DIR), )
+    $(eval $(call SetupCopyFiles,COPY_UCRT_DLLS, \
+        DEST := $(JDK_OUTPUTDIR)/bin, \
+        FILES := $(wildcard $(UCRT_DLL_DIR)/*.dll), \
+        MACRO := copy-and-chmod \
+    ))
+    COPY_FILES += $(COPY_UCRT_DLLS)
+  endif
 endif
 
 ##########################################################################################
@@ -307,9 +328,15 @@ else
   ifeq ($(CLIENT_AND_SERVER), true)
     COPY_JVM_CFG_FILE := true
   else
-    # For zero, the default jvm.cfg file is sufficient
+    # For zero, the default jvm.cfg file is sufficient.
     ifeq ($(JVM_VARIANT_ZERO), true)
       COPY_JVM_CFG_FILE := true
+    else
+      ifeq ($(OPENJDK_TARGET_CPU), aarch32)
+        ifeq ($(JVM_VARIANT_CORE), true)
+          COPY_JVM_CFG_FILE := true
+        endif
+      endif
     endif
   endif
 endif
@@ -362,14 +389,14 @@ endif
 $(PROPS_DST): $(PROPS_SRC)
 	$(MKDIR) -p $(@D)
         ifndef OPENJDK
-	  $(TOOL_ADDTORESTRICTEDPKGS) $^ $@.tmp $(RESTRICTED_PKGS)
-        else
+	$(TOOL_ADDTORESTRICTEDPKGS) $^ $@.tmp $(RESTRICTED_PKGS)
+else
 	  $(CP) $^ $@.tmp
         endif
         ifeq ($(UNLIMITED_CRYPTO), true)
 	  $(TOOL_CRYPTOLEVEL) $@.tmp $@.tmp2 unlimited
 	  $(MV) $@.tmp2 $@.tmp
-        endif
+endif
 	$(MV) $@.tmp $@
 
 COPY_FILES += $(PROPS_DST)
