@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,13 +46,14 @@
 #ifdef TARGET_ARCH_ppc
 # include "jniTypes_ppc.hpp"
 #endif
-#ifdef ZERO
+#ifdef TARGET_ARCH_aarch32
+# include "jniTypes_aarch32.hpp"
+#endif
 #ifdef TARGET_ARCH_zero
 # include "entryFrame_zero.hpp"
 # include "fakeStubFrame_zero.hpp"
 # include "interpreterFrame_zero.hpp"
 # include "sharkFrame_zero.hpp"
-#endif
 #endif
 
 // This file holds platform-independent bodies of inline functions for frames.
@@ -110,6 +111,9 @@ inline oop* frame::interpreter_frame_temp_oop_addr() const {
 #endif
 #ifdef TARGET_ARCH_ppc
 # include "frame_ppc.inline.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "frame_aarch32.inline.hpp"
 #endif
 
 

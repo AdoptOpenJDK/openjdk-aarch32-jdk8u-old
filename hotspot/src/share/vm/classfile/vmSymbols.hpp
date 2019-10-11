@@ -418,6 +418,7 @@
   template(getProtectionDomain_name,                  "getProtectionDomain")                      \
   template(getProtectionDomain_signature,             "(Ljava/security/CodeSource;)Ljava/security/ProtectionDomain;") \
   template(url_code_signer_array_void_signature,      "(Ljava/net/URL;[Ljava/security/CodeSigner;)V") \
+  template(resolved_references_name,                  "<resolved_references>")                    \
   template(referencequeue_null_name,                  "NULL")                                     \
   template(referencequeue_enqueued_name,              "ENQUEUED")                                 \
                                                                                                   \
@@ -508,6 +509,7 @@
   template(class_array_signature,                     "[Ljava/lang/Class;")                                       \
   template(classloader_signature,                     "Ljava/lang/ClassLoader;")                                  \
   template(object_signature,                          "Ljava/lang/Object;")                                       \
+  template(object_array_signature,                    "[Ljava/lang/Object;")                                       \
   template(class_signature,                           "Ljava/lang/Class;")                                        \
   template(string_signature,                          "Ljava/lang/String;")                                       \
   template(reference_signature,                       "Ljava/lang/ref/Reference;")                                \
@@ -830,21 +832,21 @@
   do_class(com_sun_crypto_provider_aescrypt,      "com/sun/crypto/provider/AESCrypt")                                   \
   do_intrinsic(_aescrypt_encryptBlock, com_sun_crypto_provider_aescrypt, encryptBlock_name, byteArray_int_byteArray_int_signature, F_R)   \
   do_intrinsic(_aescrypt_decryptBlock, com_sun_crypto_provider_aescrypt, decryptBlock_name, byteArray_int_byteArray_int_signature, F_R)   \
-   do_name(     encryptBlock_name,                                 "encryptBlock")                                      \
-   do_name(     decryptBlock_name,                                 "decryptBlock")                                      \
+   do_name(     encryptBlock_name,                                 "implEncryptBlock")                                  \
+   do_name(     decryptBlock_name,                                 "implDecryptBlock")                                  \
    do_signature(byteArray_int_byteArray_int_signature,             "([BI[BI)V")                                         \
                                                                                                                         \
   do_class(com_sun_crypto_provider_cipherBlockChaining,            "com/sun/crypto/provider/CipherBlockChaining")       \
    do_intrinsic(_cipherBlockChaining_encryptAESCrypt, com_sun_crypto_provider_cipherBlockChaining, encrypt_name, byteArray_int_int_byteArray_int_signature, F_R)   \
    do_intrinsic(_cipherBlockChaining_decryptAESCrypt, com_sun_crypto_provider_cipherBlockChaining, decrypt_name, byteArray_int_int_byteArray_int_signature, F_R)   \
-   do_name(     encrypt_name,                                      "encrypt")                                           \
-   do_name(     decrypt_name,                                      "decrypt")                                           \
+   do_name(     encrypt_name,                                      "implEncrypt")                                       \
+   do_name(     decrypt_name,                                      "implDecrypt")                                       \
    do_signature(byteArray_int_int_byteArray_int_signature,         "([BII[BI)I")                                        \
                                                                                                                         \
   /* support for sun.security.provider.SHA */                                                                           \
   do_class(sun_security_provider_sha,                              "sun/security/provider/SHA")                         \
   do_intrinsic(_sha_implCompress, sun_security_provider_sha, implCompress_name, implCompress_signature, F_R)            \
-   do_name(     implCompress_name,                                 "implCompress")                                      \
+   do_name(     implCompress_name,                                 "implCompress0")                                     \
    do_signature(implCompress_signature,                            "([BI)V")                                            \
                                                                                                                         \
   /* support for sun.security.provider.SHA2 */                                                                          \
@@ -858,7 +860,7 @@
   /* support for sun.security.provider.DigestBase */                                                                    \
   do_class(sun_security_provider_digestbase,                       "sun/security/provider/DigestBase")                  \
   do_intrinsic(_digestBase_implCompressMB, sun_security_provider_digestbase, implCompressMB_name, implCompressMB_signature, F_R)   \
-   do_name(     implCompressMB_name,                               "implCompressMultiBlock")                            \
+   do_name(     implCompressMB_name,                               "implCompressMultiBlock0")                           \
    do_signature(implCompressMB_signature,                          "([BII)I")                                           \
                                                                                                                         \
   /* support for java.util.zip */                                                                                       \

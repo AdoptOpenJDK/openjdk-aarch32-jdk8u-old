@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,7 @@
 
 #include "memory/metadataFactory.hpp"
 #include "memory/metaspaceShared.hpp"
+#include "memory/iterator.hpp"
 #include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
 
@@ -158,6 +159,10 @@ WB_ENTRY(void, WB_AddToSystemClassLoaderSearch(JNIEnv* env, jobject o, jstring s
 }
 WB_END
 
+#ifdef LINUX
+#include "utilities/elfFile.hpp"
+#include "osContainer_linux.hpp"
+#endif
 
 WB_ENTRY(jlong, WB_GetCompressedOopsMaxHeapSize(JNIEnv* env, jobject o)) {
   return (jlong)Arguments::max_heap_for_compressed_oops();
@@ -166,8 +171,8 @@ WB_END
 
 WB_ENTRY(void, WB_PrintHeapSizes(JNIEnv* env, jobject o)) {
   CollectorPolicy * p = Universe::heap()->collector_policy();
-  gclog_or_tty->print_cr("Minimum heap "SIZE_FORMAT" Initial heap "
-    SIZE_FORMAT" Maximum heap "SIZE_FORMAT" Min alignment "SIZE_FORMAT" Max alignment "SIZE_FORMAT,
+  gclog_or_tty->print_cr("Minimum heap " SIZE_FORMAT " Initial heap "
+    SIZE_FORMAT " Maximum heap " SIZE_FORMAT " Space alignment " SIZE_FORMAT " Heap alignment " SIZE_FORMAT,
     p->min_heap_byte_size(), p->initial_heap_byte_size(), p->max_heap_byte_size(),
     p->space_alignment(), p->heap_alignment());
 }
@@ -202,8 +207,8 @@ WB_ENTRY(void, WB_ReadFromNoaccessArea(JNIEnv* env, jobject o))
          Universe::narrow_oop_use_implicit_null_checks() )) {
     tty->print_cr("WB_ReadFromNoaccessArea method is useless:\n "
                   "\tUseCompressedOops is %d\n"
-                  "\trhs.base() is "PTR_FORMAT"\n"
-                  "\tUniverse::narrow_oop_base() is "PTR_FORMAT"\n"
+                  "\trhs.base() is " PTR_FORMAT "\n"
+                  "\tUniverse::narrow_oop_base() is " PTR_FORMAT "\n"
                   "\tUniverse::narrow_oop_use_implicit_null_checks() is %d",
                   UseCompressedOops,
                   rhs.base(),
@@ -256,8 +261,8 @@ static jint wb_stress_virtual_space_resize(size_t reserved_space_size,
 
 WB_ENTRY(jint, WB_StressVirtualSpaceResize(JNIEnv* env, jobject o,
         jlong reserved_space_size, jlong magnitude, jlong iterations))
-  tty->print_cr("reservedSpaceSize="JLONG_FORMAT", magnitude="JLONG_FORMAT", "
-                "iterations="JLONG_FORMAT"\n", reserved_space_size, magnitude,
+  tty->print_cr("reservedSpaceSize=" JLONG_FORMAT ", magnitude=" JLONG_FORMAT ", "
+                "iterations=" JLONG_FORMAT "\n", reserved_space_size, magnitude,
                 iterations);
   if (reserved_space_size < 0 || magnitude < 0 || iterations < 0) {
     tty->print_cr("One of variables printed above is negative. Can't proceed.\n");
@@ -365,6 +370,13 @@ WB_ENTRY(jlong, WB_NMTMallocWithPseudoStack(JNIEnv* env, jobject o, jlong size, 
   address pc = (address)(size_t)pseudo_stack;
   NativeCallStack stack(&pc, 1);
   return (jlong)(uintptr_t)os::malloc(size, mtTest, stack);
+WB_END
+
+// Alloc memory with pseudo call stack and specific memory type.
+WB_ENTRY(jlong, WB_NMTMallocWithPseudoStackAndType(JNIEnv* env, jobject o, jlong size, jint pseudo_stack, jint type))
+  address pc = (address)(size_t)pseudo_stack;
+  NativeCallStack stack(&pc, 1);
+  return (jlong)(uintptr_t)os::malloc(size, (MEMFLAGS)type, stack);
 WB_END
 
 // Free the memory allocated by NMTAllocTest
@@ -572,11 +584,6 @@ class VM_WhiteBoxOperation : public VM_Operation {
   bool allow_nested_vm_operations() const        { return true; }
 };
 
-class AlwaysFalseClosure : public BoolObjectClosure {
- public:
-  bool do_object_b(oop p) { return false; }
-};
-
 static AlwaysFalseClosure always_false;
 
 class VM_WhiteBoxCleanMethodData : public VM_WhiteBoxOperation {
@@ -624,6 +631,25 @@ WB_ENTRY(void, WB_ClearMethodState(JNIEnv* env, jobject o, jobject method))
     mh->set_prev_time(0);
 #endif
   }
+WB_END
+
+WB_ENTRY(void, WB_MarkMethodProfiled(JNIEnv* env, jobject o, jobject method))
+  jmethodID jmid = reflected_method_to_jmid(thread, env, method);
+  CHECK_JNI_EXCEPTION(env);
+  methodHandle mh(THREAD, Method::checked_resolve_jmethod_id(jmid));
+
+  MethodData* mdo = mh->method_data();
+  if (mdo == NULL) {
+    Method::build_interpreter_method_data(mh, CHECK_AND_CLEAR);
+    mdo = mh->method_data();
+  }
+  mdo->init();
+  InvocationCounter* icnt = mdo->invocation_counter();
+  InvocationCounter* bcnt = mdo->backedge_counter();
+  // set i-counter according to AdvancedThresholdPolicy::is_method_profiled
+  // because SimpleThresholdPolicy::call_predicate_helper uses > in jdk8u, that's why we need to plus one.
+  icnt->set(InvocationCounter::wait_for_compile, Tier4MinInvocationThreshold + 1);
+  bcnt->set(InvocationCounter::wait_for_compile, Tier4CompileThreshold + 1);
 WB_END
 
 template <typename T>
@@ -841,19 +867,23 @@ WB_ENTRY(jobjectArray, WB_GetNMethod(JNIEnv* env, jobject o, jobject method, jbo
   ThreadToNativeFromVM ttn(thread);
   jclass clazz = env->FindClass(vmSymbols::java_lang_Object()->as_C_string());
   CHECK_JNI_EXCEPTION_(env, NULL);
-  result = env->NewObjectArray(2, clazz, NULL);
+  result = env->NewObjectArray(3, clazz, NULL);
   if (result == NULL) {
     return result;
   }
 
-  jobject obj = integerBox(thread, env, code->comp_level());
+  jobject level = integerBox(thread, env, code->comp_level());
   CHECK_JNI_EXCEPTION_(env, NULL);
-  env->SetObjectArrayElement(result, 0, obj);
+  env->SetObjectArrayElement(result, 0, level);
+
+  jobject id = integerBox(thread, env, code->compile_id());
+  CHECK_JNI_EXCEPTION_(env, NULL);
+  env->SetObjectArrayElement(result, 1, id);
 
   jbyteArray insts = env->NewByteArray(insts_size);
   CHECK_JNI_EXCEPTION_(env, NULL);
   env->SetByteArrayRegion(insts, 0, insts_size, (jbyte*) code->insts_begin());
-  env->SetObjectArrayElement(result, 1, insts);
+  env->SetObjectArrayElement(result, 2, insts);
 
   return result;
 WB_END
@@ -1010,6 +1040,30 @@ void WhiteBox::register_methods(JNIEnv* env, jclass wbclass, JavaThread* thread,
   }
 }
 
+// Checks that the library libfile has the noexecstack bit set.
+WB_ENTRY(jboolean, WB_CheckLibSpecifiesNoexecstack(JNIEnv* env, jobject o, jstring libfile))
+  jboolean ret = false;
+#ifdef LINUX
+  // Can't be in VM when we call JNI.
+  ThreadToNativeFromVM ttnfv(thread);
+  const char* lf = env->GetStringUTFChars(libfile, NULL);
+  CHECK_JNI_EXCEPTION_(env, 0);
+  ElfFile ef(lf);
+  ret = (jboolean) ef.specifies_noexecstack();
+  env->ReleaseStringUTFChars(libfile, lf);
+#endif
+  return ret;
+WB_END
+
+WB_ENTRY(jboolean, WB_IsContainerized(JNIEnv* env, jobject o))
+  LINUX_ONLY(return OSContainer::is_containerized();)
+  return false;
+WB_END
+
+WB_ENTRY(void, WB_PrintOsInfo(JNIEnv* env, jobject o))
+  os::print_os_info(tty);
+WB_END
+
 #define CC (char*)
 
 static JNINativeMethod methods[] = {
@@ -1053,6 +1107,7 @@ static JNINativeMethod methods[] = {
 #if INCLUDE_NMT
   {CC"NMTMalloc",           CC"(J)J",                 (void*)&WB_NMTMalloc          },
   {CC"NMTMallocWithPseudoStack", CC"(JI)J",           (void*)&WB_NMTMallocWithPseudoStack},
+  {CC"NMTMallocWithPseudoStackAndType", CC"(JII)J",   (void*)&WB_NMTMallocWithPseudoStackAndType},
   {CC"NMTFree",             CC"(J)V",                 (void*)&WB_NMTFree            },
   {CC"NMTReserveMemory",    CC"(J)J",                 (void*)&WB_NMTReserveMemory   },
   {CC"NMTCommitMemory",     CC"(JJ)V",                (void*)&WB_NMTCommitMemory    },
@@ -1087,6 +1142,8 @@ static JNINativeMethod methods[] = {
       CC"(Ljava/lang/reflect/Executable;II)Z",        (void*)&WB_EnqueueMethodForCompilation},
   {CC"clearMethodState",
       CC"(Ljava/lang/reflect/Executable;)V",          (void*)&WB_ClearMethodState},
+  {CC"markMethodProfiled",
+      CC"(Ljava/lang/reflect/Executable;)V",          (void*)&WB_MarkMethodProfiled},
   {CC"setBooleanVMFlag",   CC"(Ljava/lang/String;Z)V",(void*)&WB_SetBooleanVMFlag},
   {CC"setIntxVMFlag",      CC"(Ljava/lang/String;J)V",(void*)&WB_SetIntxVMFlag},
   {CC"setUintxVMFlag",     CC"(Ljava/lang/String;J)V",(void*)&WB_SetUintxVMFlag},
@@ -1121,6 +1178,10 @@ static JNINativeMethod methods[] = {
                                                       (void*)&WB_GetNMethod         },
   {CC"isMonitorInflated",  CC"(Ljava/lang/Object;)Z", (void*)&WB_IsMonitorInflated  },
   {CC"forceSafepoint",     CC"()V",                   (void*)&WB_ForceSafepoint     },
+  {CC"checkLibSpecifiesNoexecstack", CC"(Ljava/lang/String;)Z",
+                                                      (void*)&WB_CheckLibSpecifiesNoexecstack},
+  {CC"isContainerized",           CC"()Z",            (void*)&WB_IsContainerized },
+  {CC"printOsInfo",               CC"()V",            (void*)&WB_PrintOsInfo },
 };
 
 #undef CC

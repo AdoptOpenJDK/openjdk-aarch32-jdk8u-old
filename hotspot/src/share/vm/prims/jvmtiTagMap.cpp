@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -47,6 +47,7 @@
 #include "services/serviceUtil.hpp"
 #include "utilities/macros.hpp"
 #if INCLUDE_ALL_GCS
+#include "gc_implementation/g1/g1SATBCardTableModRefBS.hpp"
 #include "gc_implementation/parallelScavenge/parallelScavengeHeap.hpp"
 #endif // INCLUDE_ALL_GCS
 
@@ -429,7 +430,7 @@ JvmtiTagMap::JvmtiTagMap(JvmtiEnv* env) :
   _hashmap = new JvmtiTagHashmap();
 
   // finally add us to the environment
-  ((JvmtiEnvBase *)env)->set_tag_map(this);
+  ((JvmtiEnvBase *)env)->release_set_tag_map(this);
 }
 
 
@@ -498,7 +499,7 @@ void JvmtiTagMap::destroy_entry(JvmtiTagHashmapEntry* entry) {
 // returns the tag map for the given environments. If the tag map
 // doesn't exist then it is created.
 JvmtiTagMap* JvmtiTagMap::tag_map_for(JvmtiEnv* env) {
-  JvmtiTagMap* tag_map = ((JvmtiEnvBase*)env)->tag_map();
+  JvmtiTagMap* tag_map = ((JvmtiEnvBase*)env)->tag_map_acquire();
   if (tag_map == NULL) {
     MutexLocker mu(JvmtiThreadState_lock);
     tag_map = ((JvmtiEnvBase*)env)->tag_map();
@@ -1519,6 +1520,14 @@ class TagObjectCollector : public JvmtiTagHashmapEntryClosure {
       if (_tags[i] == entry->tag()) {
         oop o = entry->object();
         assert(o != NULL && Universe::heap()->is_in_reserved(o), "sanity check");
+#if INCLUDE_ALL_GCS
+        if (UseG1GC) {
+          // The reference in this tag map could be the only (implicitly weak)
+          // reference to that object. If we hand it out, we need to keep it live wrt
+          // SATB marking similar to other j.l.ref.Reference referents.
+          G1SATBCardTableModRefBS::enqueue(o);
+        }
+#endif
         jobject ref = JNIHandles::make_local(JavaThread::current(), o);
         _object_results->append(ref);
         _tag_results->append((uint64_t)entry->tag());
@@ -3273,7 +3282,7 @@ void JvmtiTagMap::weak_oops_do(BoolObjectClosure* is_alive, OopClosure* f) {
   if (JvmtiEnv::environments_might_exist()) {
     JvmtiEnvIterator it;
     for (JvmtiEnvBase* env = it.first(); env != NULL; env = it.next(env)) {
-      JvmtiTagMap* tag_map = env->tag_map();
+      JvmtiTagMap* tag_map = env->tag_map_acquire();
       if (tag_map != NULL && !tag_map->is_empty()) {
         tag_map->do_weak_oops(is_alive, f);
       }

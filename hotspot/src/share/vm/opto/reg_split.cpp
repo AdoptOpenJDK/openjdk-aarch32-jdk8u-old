@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,7 +59,7 @@ Node *PhaseChaitin::get_spillcopy_wide( Node *def, Node *use, uint uidx ) {
   // If ideal reg doesn't exist we've got a bad schedule happening
   // that is forcing us to spill something that isn't spillable.
   // Bail rather than abort
-  int ireg = def->ideal_reg();
+  uint ireg = def->ideal_reg();
   if( ireg == 0 || ireg == Op_RegFlags ) {
     assert(false, "attempted to spill a non-spillable item");
     C->record_method_not_compilable("attempted to spill a non-spillable item");
@@ -1163,7 +1163,7 @@ uint PhaseChaitin::Split(uint maxlrg, ResourceArea* split_arena) {
         // Grab UP info for DEF
         const RegMask &dmask = n->out_RegMask();
         bool defup = dmask.is_UP();
-        int ireg = n->ideal_reg();
+        uint ireg = n->ideal_reg();
         bool is_vect = RegMask::is_vector(ireg);
         // Only split at Def if this is a HRP block or bound (and spilled once)
         if( !n->rematerialize() &&
@@ -1171,9 +1171,8 @@ uint PhaseChaitin::Split(uint maxlrg, ResourceArea* split_arena) {
               (deflrg._direct_conflict || deflrg._must_spill)) ||
              // Check for LRG being up in a register and we are inside a high
              // pressure area.  Spill it down immediately.
-             (defup && is_high_pressure(b,&deflrg,insidx))) ) {
+             (defup && is_high_pressure(b,&deflrg,insidx) && !n->is_SpillCopy())) ) {
           assert( !n->rematerialize(), "" );
-          assert( !n->is_SpillCopy(), "" );
           // Do a split at the def site.
           maxlrg = split_DEF( n, b, insidx, maxlrg, Reachblock, debug_defs, splits, slidx );
           // If it wasn't split bail

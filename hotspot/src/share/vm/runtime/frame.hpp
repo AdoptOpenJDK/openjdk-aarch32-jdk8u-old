@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -43,12 +43,12 @@
 # include "adfiles/adGlobals_zero.hpp"
 #elif defined TARGET_ARCH_MODEL_ppc_64
 # include "adfiles/adGlobals_ppc_64.hpp"
+#elif defined TARGET_ARCH_MODEL_aarch32
+# include "adfiles/adGlobals_aarch32.hpp"
 #endif
 #endif // COMPILER2
-#ifdef ZERO
 #ifdef TARGET_ARCH_zero
 # include "stack_zero.hpp"
-#endif
 #endif
 
 typedef class BytecodeInterpreter* interpreterState;
@@ -498,6 +498,9 @@ class frame VALUE_OBJ_CLASS_SPEC {
 #endif
 #ifdef TARGET_ARCH_ppc
 # include "frame_ppc.hpp"
+#endif
+#ifdef TARGET_ARCH_aarch32
+# include "frame_aarch32.hpp"
 #endif
 
 };

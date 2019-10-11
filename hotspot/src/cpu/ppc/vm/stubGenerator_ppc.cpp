@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 1997, 2013, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2012, 2014 SAP AG. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1131,8 +1131,11 @@ class StubGenerator: public StubCodeGenerator {
     Register tmp3 = R8_ARG6;
     Register tmp4 = R9_ARG7;
 
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
 
-    Label l_1, l_2, l_3, l_4, l_5, l_6, l_7, l_8, l_9;
+    Label l_1, l_2, l_3, l_4, l_5, l_6, l_7, l_8, l_9, l_10;
+
     // Don't try anything fancy if arrays don't have many elements.
     __ li(tmp3, 0);
     __ cmpwi(CCR0, R5_ARG3, 17);
@@ -1186,6 +1189,8 @@ class StubGenerator: public StubCodeGenerator {
       __ andi_(R5_ARG3, R5_ARG3, 31);
       __ mtctr(tmp1);
 
+     if (!VM_Version::has_vsx()) {
+
       __ bind(l_8);
       // Use unrolled version for mass copying (copy 32 elements a time)
       // Load feeding store gets zero latency on Power6, however not on Power5.
@@ -1201,7 +1206,44 @@ class StubGenerator: public StubCodeGenerator {
       __ addi(R3_ARG1, R3_ARG1, 32);
       __ addi(R4_ARG2, R4_ARG2, 32);
       __ bdnz(l_8);
-    }
+
+    } else { // Processor supports VSX, so use it to mass copy.
+
+      // Prefetch the data into the L2 cache.
+      __ dcbt(R3_ARG1, 0);
+
+      // If supported set DSCR pre-fetch to deepest.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+        __ mtdscr(tmp2);
+      }
+
+      __ li(tmp1, 16);
+
+      // Backbranch target aligned to 32-byte. Not 16-byte align as
+      // loop contains < 8 instructions that fit inside a single
+      // i-cache sector.
+      __ align(32);
+
+      __ bind(l_10);
+      // Use loop with VSX load/store instructions to
+      // copy 32 elements a time.
+      __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load src
+      __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst
+      __ lxvd2x(tmp_vsr2, tmp1, R3_ARG1);  // Load src + 16
+      __ stxvd2x(tmp_vsr2, tmp1, R4_ARG2); // Store to dst + 16
+      __ addi(R3_ARG1, R3_ARG1, 32);       // Update src+=32
+      __ addi(R4_ARG2, R4_ARG2, 32);       // Update dsc+=32
+      __ bdnz(l_10);                       // Dec CTR and loop if not zero.
+
+      // Restore DSCR pre-fetch value.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+        __ mtdscr(tmp2);
+      }
+
+    } // VSX
+   } // FasterArrayCopy
 
     __ bind(l_6);
 
@@ -1352,9 +1394,13 @@ class StubGenerator: public StubCodeGenerator {
     Register tmp3 = R8_ARG6;
     Register tmp4 = R9_ARG7;
 
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
+
     address start = __ function_entry();
 
-      Label l_1, l_2, l_3, l_4, l_5, l_6, l_7, l_8;
+    Label l_1, l_2, l_3, l_4, l_5, l_6, l_7, l_8, l_9;
+
     // don't try anything fancy if arrays don't have many elements
     __ li(tmp3, 0);
     __ cmpwi(CCR0, R5_ARG3, 9);
@@ -1412,22 +1458,60 @@ class StubGenerator: public StubCodeGenerator {
       __ andi_(R5_ARG3, R5_ARG3, 15);
       __ mtctr(tmp1);
 
-      __ bind(l_8);
-      // Use unrolled version for mass copying (copy 16 elements a time).
-      // Load feeding store gets zero latency on Power6, however not on Power5.
-      // Therefore, the following sequence is made for the good of both.
-      __ ld(tmp1, 0, R3_ARG1);
-      __ ld(tmp2, 8, R3_ARG1);
-      __ ld(tmp3, 16, R3_ARG1);
-      __ ld(tmp4, 24, R3_ARG1);
-      __ std(tmp1, 0, R4_ARG2);
-      __ std(tmp2, 8, R4_ARG2);
-      __ std(tmp3, 16, R4_ARG2);
-      __ std(tmp4, 24, R4_ARG2);
-      __ addi(R3_ARG1, R3_ARG1, 32);
-      __ addi(R4_ARG2, R4_ARG2, 32);
-      __ bdnz(l_8);
-    }
+      if (!VM_Version::has_vsx()) {
+
+        __ bind(l_8);
+        // Use unrolled version for mass copying (copy 16 elements a time).
+        // Load feeding store gets zero latency on Power6, however not on Power5.
+        // Therefore, the following sequence is made for the good of both.
+        __ ld(tmp1, 0, R3_ARG1);
+        __ ld(tmp2, 8, R3_ARG1);
+        __ ld(tmp3, 16, R3_ARG1);
+        __ ld(tmp4, 24, R3_ARG1);
+        __ std(tmp1, 0, R4_ARG2);
+        __ std(tmp2, 8, R4_ARG2);
+        __ std(tmp3, 16, R4_ARG2);
+        __ std(tmp4, 24, R4_ARG2);
+        __ addi(R3_ARG1, R3_ARG1, 32);
+        __ addi(R4_ARG2, R4_ARG2, 32);
+        __ bdnz(l_8);
+
+      } else { // Processor supports VSX, so use it to mass copy.
+
+        // Prefetch src data into L2 cache.
+        __ dcbt(R3_ARG1, 0);
+
+        // If supported set DSCR pre-fetch to deepest.
+        if (VM_Version::has_mfdscr()) {
+          __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+          __ mtdscr(tmp2);
+        }
+        __ li(tmp1, 16);
+
+        // Backbranch target aligned to 32-byte. It's not aligned 16-byte
+        // as loop contains < 8 instructions that fit inside a single
+        // i-cache sector.
+        __ align(32);
+
+        __ bind(l_9);
+        // Use loop with VSX load/store instructions to
+        // copy 16 elements a time.
+        __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load from src.
+        __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst.
+        __ lxvd2x(tmp_vsr2, R3_ARG1, tmp1);  // Load from src + 16.
+        __ stxvd2x(tmp_vsr2, R4_ARG2, tmp1); // Store to dst + 16.
+        __ addi(R3_ARG1, R3_ARG1, 32);       // Update src+=32.
+        __ addi(R4_ARG2, R4_ARG2, 32);       // Update dsc+=32.
+        __ bdnz(l_9);                        // Dec CTR and loop if not zero.
+
+        // Restore DSCR pre-fetch value.
+        if (VM_Version::has_mfdscr()) {
+          __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+          __ mtdscr(tmp2);
+        }
+
+      }
+    } // FasterArrayCopy
     __ bind(l_6);
 
     // copy 2 elements at a time
@@ -1528,7 +1612,11 @@ class StubGenerator: public StubCodeGenerator {
     Register tmp3 = R8_ARG6;
     Register tmp4 = R0;
 
-    Label l_1, l_2, l_3, l_4, l_5, l_6;
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
+
+    Label l_1, l_2, l_3, l_4, l_5, l_6, l_7;
+
     // for short arrays, just do single element copy
     __ li(tmp3, 0);
     __ cmpwi(CCR0, R5_ARG3, 5);
@@ -1563,6 +1651,8 @@ class StubGenerator: public StubCodeGenerator {
       __ andi_(R5_ARG3, R5_ARG3, 7);
       __ mtctr(tmp1);
 
+     if (!VM_Version::has_vsx()) {
+
       __ bind(l_6);
       // Use unrolled version for mass copying (copy 8 elements a time).
       // Load feeding store gets zero latency on power6, however not on power 5.
@@ -1578,7 +1668,44 @@ class StubGenerator: public StubCodeGenerator {
       __ addi(R3_ARG1, R3_ARG1, 32);
       __ addi(R4_ARG2, R4_ARG2, 32);
       __ bdnz(l_6);
-    }
+
+    } else { // Processor supports VSX, so use it to mass copy.
+
+      // Prefetch the data into the L2 cache.
+      __ dcbt(R3_ARG1, 0);
+
+      // If supported set DSCR pre-fetch to deepest.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+        __ mtdscr(tmp2);
+      }
+
+      __ li(tmp1, 16);
+
+      // Backbranch target aligned to 32-byte. Not 16-byte align as
+      // loop contains < 8 instructions that fit inside a single
+      // i-cache sector.
+      __ align(32);
+
+      __ bind(l_7);
+      // Use loop with VSX load/store instructions to
+      // copy 8 elements a time.
+      __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load src
+      __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst
+      __ lxvd2x(tmp_vsr2, tmp1, R3_ARG1);  // Load src + 16
+      __ stxvd2x(tmp_vsr2, tmp1, R4_ARG2); // Store to dst + 16
+      __ addi(R3_ARG1, R3_ARG1, 32);       // Update src+=32
+      __ addi(R4_ARG2, R4_ARG2, 32);       // Update dsc+=32
+      __ bdnz(l_7);                        // Dec CTR and loop if not zero.
+
+      // Restore DSCR pre-fetch value.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+        __ mtdscr(tmp2);
+      }
+
+    } // VSX
+   } // FasterArrayCopy
 
     // copy 1 element at a time
     __ bind(l_2);
@@ -1629,12 +1756,15 @@ class StubGenerator: public StubCodeGenerator {
     // Do reverse copy.  We assume the case of actual overlap is rare enough
     // that we don't have to optimize it.
 
-    Label l_1, l_2, l_3, l_4, l_5, l_6;
+    Label l_1, l_2, l_3, l_4, l_5, l_6, l_7;
 
     Register tmp1 = R6_ARG4;
     Register tmp2 = R7_ARG5;
     Register tmp3 = R8_ARG6;
     Register tmp4 = R0;
+
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
 
     { // FasterArrayCopy
       __ cmpwi(CCR0, R5_ARG3, 0);
@@ -1645,6 +1775,25 @@ class StubGenerator: public StubCodeGenerator {
       __ add(R4_ARG2, R4_ARG2, R5_ARG3);
       __ srdi(R5_ARG3, R5_ARG3, 2);
 
+      if (!aligned) {
+        // check if arrays have same alignment mod 8.
+        __ xorr(tmp1, R3_ARG1, R4_ARG2);
+        __ andi_(R0, tmp1, 7);
+        // Not the same alignment, but ld and std just need to be 4 byte aligned.
+        __ bne(CCR0, l_7); // to OR from is 8 byte aligned -> copy 2 at a time
+
+        // copy 1 element to align to and from on an 8 byte boundary
+        __ andi_(R0, R3_ARG1, 7);
+        __ beq(CCR0, l_7);
+
+        __ addi(R3_ARG1, R3_ARG1, -4);
+        __ addi(R4_ARG2, R4_ARG2, -4);
+        __ addi(R5_ARG3, R5_ARG3, -1);
+        __ lwzx(tmp2, R3_ARG1);
+        __ stwx(tmp2, R4_ARG2);
+        __ bind(l_7);
+      }
+
       __ cmpwi(CCR0, R5_ARG3, 7);
       __ ble(CCR0, l_5); // copy 1 at a time if less than 8 elements remain
 
@@ -1652,6 +1801,7 @@ class StubGenerator: public StubCodeGenerator {
       __ andi(R5_ARG3, R5_ARG3, 7);
       __ mtctr(tmp1);
 
+     if (!VM_Version::has_vsx()) {
       __ bind(l_4);
       // Use unrolled version for mass copying (copy 4 elements a time).
       // Load feeding store gets zero latency on Power6, however not on Power5.
@@ -1667,6 +1817,40 @@ class StubGenerator: public StubCodeGenerator {
       __ std(tmp2, 8, R4_ARG2);
       __ std(tmp1, 0, R4_ARG2);
       __ bdnz(l_4);
+     } else {  // Processor supports VSX, so use it to mass copy.
+      // Prefetch the data into the L2 cache.
+      __ dcbt(R3_ARG1, 0);
+
+      // If supported set DSCR pre-fetch to deepest.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+        __ mtdscr(tmp2);
+      }
+
+      __ li(tmp1, 16);
+
+      // Backbranch target aligned to 32-byte. Not 16-byte align as
+      // loop contains < 8 instructions that fit inside a single
+      // i-cache sector.
+      __ align(32);
+
+      __ bind(l_4);
+      // Use loop with VSX load/store instructions to
+      // copy 8 elements a time.
+      __ addi(R3_ARG1, R3_ARG1, -32);      // Update src-=32
+      __ addi(R4_ARG2, R4_ARG2, -32);      // Update dsc-=32
+      __ lxvd2x(tmp_vsr2, tmp1, R3_ARG1);  // Load src+16
+      __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load src
+      __ stxvd2x(tmp_vsr2, tmp1, R4_ARG2); // Store to dst+16
+      __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst
+      __ bdnz(l_4);
+
+      // Restore DSCR pre-fetch value.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+        __ mtdscr(tmp2);
+      }
+     }
 
       __ cmpwi(CCR0, R5_ARG3, 0);
       __ beq(CCR0, l_6);
@@ -1730,7 +1914,10 @@ class StubGenerator: public StubCodeGenerator {
     Register tmp3 = R8_ARG6;
     Register tmp4 = R0;
 
-    Label l_1, l_2, l_3, l_4;
+    Label l_1, l_2, l_3, l_4, l_5;
+
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
 
     { // FasterArrayCopy
       __ cmpwi(CCR0, R5_ARG3, 3);
@@ -1740,6 +1927,7 @@ class StubGenerator: public StubCodeGenerator {
       __ andi_(R5_ARG3, R5_ARG3, 3);
       __ mtctr(tmp1);
 
+    if (!VM_Version::has_vsx()) {
       __ bind(l_4);
       // Use unrolled version for mass copying (copy 4 elements a time).
       // Load feeding store gets zero latency on Power6, however not on Power5.
@@ -1755,7 +1943,44 @@ class StubGenerator: public StubCodeGenerator {
       __ addi(R3_ARG1, R3_ARG1, 32);
       __ addi(R4_ARG2, R4_ARG2, 32);
       __ bdnz(l_4);
-    }
+
+    } else { // Processor supports VSX, so use it to mass copy.
+
+      // Prefetch the data into the L2 cache.
+      __ dcbt(R3_ARG1, 0);
+
+      // If supported set DSCR pre-fetch to deepest.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+        __ mtdscr(tmp2);
+      }
+
+      __ li(tmp1, 16);
+
+      // Backbranch target aligned to 32-byte. Not 16-byte align as
+      // loop contains < 8 instructions that fit inside a single
+      // i-cache sector.
+      __ align(32);
+
+      __ bind(l_5);
+      // Use loop with VSX load/store instructions to
+      // copy 4 elements a time.
+      __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load src
+      __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst
+      __ lxvd2x(tmp_vsr2, tmp1, R3_ARG1);  // Load src + 16
+      __ stxvd2x(tmp_vsr2, tmp1, R4_ARG2); // Store to dst + 16
+      __ addi(R3_ARG1, R3_ARG1, 32);       // Update src+=32
+      __ addi(R4_ARG2, R4_ARG2, 32);       // Update dsc+=32
+      __ bdnz(l_5);                        // Dec CTR and loop if not zero.
+
+      // Restore DSCR pre-fetch value.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+        __ mtdscr(tmp2);
+      }
+
+    } // VSX
+   } // FasterArrayCopy
 
     // copy 1 element at a time
     __ bind(l_3);
@@ -1808,6 +2033,9 @@ class StubGenerator: public StubCodeGenerator {
     Register tmp3 = R8_ARG6;
     Register tmp4 = R0;
 
+    VectorSRegister tmp_vsr1  = VSR1;
+    VectorSRegister tmp_vsr2  = VSR2;
+
     Label l_1, l_2, l_3, l_4, l_5;
 
     __ cmpwi(CCR0, R5_ARG3, 0);
@@ -1826,6 +2054,7 @@ class StubGenerator: public StubCodeGenerator {
       __ andi(R5_ARG3, R5_ARG3, 3);
       __ mtctr(tmp1);
 
+     if (!VM_Version::has_vsx()) {
       __ bind(l_4);
       // Use unrolled version for mass copying (copy 4 elements a time).
       // Load feeding store gets zero latency on Power6, however not on Power5.
@@ -1841,6 +2070,40 @@ class StubGenerator: public StubCodeGenerator {
       __ std(tmp2, 8, R4_ARG2);
       __ std(tmp1, 0, R4_ARG2);
       __ bdnz(l_4);
+     } else { // Processor supports VSX, so use it to mass copy.
+      // Prefetch the data into the L2 cache.
+      __ dcbt(R3_ARG1, 0);
+
+      // If supported set DSCR pre-fetch to deepest.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val | 7);
+        __ mtdscr(tmp2);
+      }
+
+      __ li(tmp1, 16);
+
+      // Backbranch target aligned to 32-byte. Not 16-byte align as
+      // loop contains < 8 instructions that fit inside a single
+      // i-cache sector.
+      __ align(32);
+
+      __ bind(l_4);
+      // Use loop with VSX load/store instructions to
+      // copy 4 elements a time.
+      __ addi(R3_ARG1, R3_ARG1, -32);      // Update src-=32
+      __ addi(R4_ARG2, R4_ARG2, -32);      // Update dsc-=32
+      __ lxvd2x(tmp_vsr2, tmp1, R3_ARG1);  // Load src+16
+      __ lxvd2x(tmp_vsr1, R3_ARG1);        // Load src
+      __ stxvd2x(tmp_vsr2, tmp1, R4_ARG2); // Store to dst+16
+      __ stxvd2x(tmp_vsr1, R4_ARG2);       // Store to dst
+      __ bdnz(l_4);
+
+      // Restore DSCR pre-fetch value.
+      if (VM_Version::has_mfdscr()) {
+        __ load_const_optimized(tmp2, VM_Version::_dscr_val);
+        __ mtdscr(tmp2);
+      }
+     }
 
       __ cmpwi(CCR0, R5_ARG3, 0);
       __ beq(CCR0, l_1);
@@ -1961,7 +2224,7 @@ class StubGenerator: public StubCodeGenerator {
     return start;
   }
 
-  // Arguments for generated stub (little endian only):
+  // Arguments for generated stub:
   //   R3_ARG1   - source byte array address
   //   R4_ARG2   - destination byte array address
   //   R5_ARG3   - round key array
@@ -1980,7 +2243,6 @@ class StubGenerator: public StubCodeGenerator {
     Register keylen         = R8;
     Register temp           = R9;
     Register keypos         = R10;
-    Register hex            = R11;
     Register fifteen        = R12;
 
     VectorRegister vRet     = VR0;
@@ -2000,164 +2262,170 @@ class StubGenerator: public StubCodeGenerator {
     VectorRegister vTmp3    = VR11;
     VectorRegister vTmp4    = VR12;
 
-    VectorRegister vLow     = VR13;
-    VectorRegister vHigh    = VR14;
-
-    __ li              (hex, 16);
     __ li              (fifteen, 15);
-    __ vspltisb        (fSplt, 0x0f);
 
     // load unaligned from[0-15] to vsRet
     __ lvx             (vRet, from);
     __ lvx             (vTmp1, fifteen, from);
     __ lvsl            (fromPerm, from);
+#ifdef VM_LITTLE_ENDIAN
+    __ vspltisb        (fSplt, 0x0f);
     __ vxor            (fromPerm, fromPerm, fSplt);
+#endif
     __ vperm           (vRet, vRet, vTmp1, fromPerm);
 
     // load keylen (44 or 52 or 60)
     __ lwz             (keylen, arrayOopDesc::length_offset_in_bytes() - arrayOopDesc::base_offset_in_bytes(T_INT), key);
 
     // to load keys
-    __ lvsr            (keyPerm, key);
-    __ vxor            (vTmp2, vTmp2, vTmp2);
+    __ load_perm       (keyPerm, key);
+#ifdef VM_LITTLE_ENDIAN
     __ vspltisb        (vTmp2, -16);
     __ vrld            (keyPerm, keyPerm, vTmp2);
     __ vrld            (keyPerm, keyPerm, vTmp2);
-    __ vsldoi          (keyPerm, keyPerm, keyPerm, -8);
+    __ vsldoi          (keyPerm, keyPerm, keyPerm, 8);
+#endif
 
-    // load the 1st round key to vKey1
-    __ li              (keypos, 0);
+    // load the 1st round key to vTmp1
+    __ lvx             (vTmp1, key);
+    __ li              (keypos, 16);
     __ lvx             (vKey1, keypos, key);
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey1, vTmp1, vKey1, keyPerm);
+    __ vec_perm        (vTmp1, vKey1, keyPerm);
 
     // 1st round
-    __ vxor (vRet, vRet, vKey1);
+    __ vxor            (vRet, vRet, vTmp1);
 
     // load the 2nd round key to vKey1
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 32);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vKey2, keyPerm);
 
     // load the 3rd round key to vKey2
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
+    __ li              (keypos, 48);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, keyPerm);
 
     // load the 4th round key to vKey3
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey3, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 64);
+    __ lvx             (vKey4, keypos, key);
+    __ vec_perm        (vKey3, vKey4, keyPerm);
 
     // load the 5th round key to vKey4
-    __ addi            (keypos, keypos, 16);
+    __ li              (keypos, 80);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey4, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey4, vTmp1, keyPerm);
 
     // 2nd - 5th rounds
-    __ vcipher (vRet, vRet, vKey1);
-    __ vcipher (vRet, vRet, vKey2);
-    __ vcipher (vRet, vRet, vKey3);
-    __ vcipher (vRet, vRet, vKey4);
+    __ vcipher         (vRet, vRet, vKey1);
+    __ vcipher         (vRet, vRet, vKey2);
+    __ vcipher         (vRet, vRet, vKey3);
+    __ vcipher         (vRet, vRet, vKey4);
 
     // load the 6th round key to vKey1
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 96);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vTmp1, vKey2, keyPerm);
 
     // load the 7th round key to vKey2
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
+    __ li              (keypos, 112);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, keyPerm);
 
     // load the 8th round key to vKey3
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey3, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 128);
+    __ lvx             (vKey4, keypos, key);
+    __ vec_perm        (vKey3, vKey4, keyPerm);
 
     // load the 9th round key to vKey4
-    __ addi            (keypos, keypos, 16);
+    __ li              (keypos, 144);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey4, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey4, vTmp1, keyPerm);
 
     // 6th - 9th rounds
-    __ vcipher (vRet, vRet, vKey1);
-    __ vcipher (vRet, vRet, vKey2);
-    __ vcipher (vRet, vRet, vKey3);
-    __ vcipher (vRet, vRet, vKey4);
+    __ vcipher         (vRet, vRet, vKey1);
+    __ vcipher         (vRet, vRet, vKey2);
+    __ vcipher         (vRet, vRet, vKey3);
+    __ vcipher         (vRet, vRet, vKey4);
 
     // load the 10th round key to vKey1
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 160);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vTmp1, vKey2, keyPerm);
 
     // load the 11th round key to vKey2
-    __ addi            (keypos, keypos, 16);
+    __ li              (keypos, 176);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey2, vTmp1, keyPerm);
 
     // if all round keys are loaded, skip next 4 rounds
     __ cmpwi           (CCR0, keylen, 44);
     __ beq             (CCR0, L_doLast);
 
     // 10th - 11th rounds
-    __ vcipher (vRet, vRet, vKey1);
-    __ vcipher (vRet, vRet, vKey2);
+    __ vcipher         (vRet, vRet, vKey1);
+    __ vcipher         (vRet, vRet, vKey2);
 
     // load the 12th round key to vKey1
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 192);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vTmp1, vKey2, keyPerm);
 
     // load the 13th round key to vKey2
-    __ addi            (keypos, keypos, 16);
+    __ li              (keypos, 208);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey2, vTmp1, keyPerm);
 
     // if all round keys are loaded, skip next 2 rounds
     __ cmpwi           (CCR0, keylen, 52);
     __ beq             (CCR0, L_doLast);
 
     // 12th - 13th rounds
-    __ vcipher (vRet, vRet, vKey1);
-    __ vcipher (vRet, vRet, vKey2);
+    __ vcipher         (vRet, vRet, vKey1);
+    __ vcipher         (vRet, vRet, vKey2);
 
     // load the 14th round key to vKey1
-    __ addi            (keypos, keypos, 16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
+    __ li              (keypos, 224);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vTmp1, vKey2, keyPerm);
 
     // load the 15th round key to vKey2
-    __ addi            (keypos, keypos, 16);
+    __ li              (keypos, 240);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey2, vTmp1, keyPerm);
 
     __ bind(L_doLast);
 
     // last two rounds
-    __ vcipher (vRet, vRet, vKey1);
-    __ vcipherlast (vRet, vRet, vKey2);
+    __ vcipher         (vRet, vRet, vKey1);
+    __ vcipherlast     (vRet, vRet, vKey2);
 
-    __ neg             (temp, to);
-    __ lvsr            (toPerm, temp);
-    __ vspltisb        (vTmp2, -1);
-    __ vxor            (vTmp1, vTmp1, vTmp1);
-    __ vperm           (vTmp2, vTmp2, vTmp1, toPerm);
-    __ vxor            (toPerm, toPerm, fSplt);
+    // store result (unaligned)
+#ifdef VM_LITTLE_ENDIAN
+    __ lvsl            (toPerm, to);
+#else
+    __ lvsr            (toPerm, to);
+#endif
+    __ vspltisb        (vTmp3, -1);
+    __ vspltisb        (vTmp4, 0);
     __ lvx             (vTmp1, to);
-    __ vperm           (vRet, vRet, vRet, toPerm);
-    __ vsel            (vTmp1, vTmp1, vRet, vTmp2);
-    __ lvx             (vTmp4, fifteen, to);
+    __ lvx             (vTmp2, fifteen, to);
+#ifdef VM_LITTLE_ENDIAN
+    __ vperm           (vTmp3, vTmp3, vTmp4, toPerm); // generate select mask
+    __ vxor            (toPerm, toPerm, fSplt);       // swap bytes
+#else
+    __ vperm           (vTmp3, vTmp4, vTmp3, toPerm); // generate select mask
+#endif
+    __ vperm           (vTmp4, vRet, vRet, toPerm);   // rotate data
+    __ vsel            (vTmp2, vTmp4, vTmp2, vTmp3);
+    __ vsel            (vTmp1, vTmp1, vTmp4, vTmp3);
+    __ stvx            (vTmp2, fifteen, to);          // store this one first (may alias)
     __ stvx            (vTmp1, to);
-    __ vsel            (vRet, vRet, vTmp4, vTmp2);
-    __ stvx            (vRet, fifteen, to);
 
     __ blr();
      return start;
   }
 
-  // Arguments for generated stub (little endian only):
+  // Arguments for generated stub:
   //   R3_ARG1   - source byte array address
   //   R4_ARG2   - destination byte array address
   //   R5_ARG3   - K (key) in little endian int array
@@ -2179,7 +2447,6 @@ class StubGenerator: public StubCodeGenerator {
     Register keylen         = R8;
     Register temp           = R9;
     Register keypos         = R10;
-    Register hex            = R11;
     Register fifteen        = R12;
 
     VectorRegister vRet     = VR0;
@@ -2200,30 +2467,30 @@ class StubGenerator: public StubCodeGenerator {
     VectorRegister vTmp3    = VR12;
     VectorRegister vTmp4    = VR13;
 
-    VectorRegister vLow     = VR14;
-    VectorRegister vHigh    = VR15;
-
-    __ li              (hex, 16);
     __ li              (fifteen, 15);
-    __ vspltisb        (fSplt, 0x0f);
 
     // load unaligned from[0-15] to vsRet
     __ lvx             (vRet, from);
     __ lvx             (vTmp1, fifteen, from);
     __ lvsl            (fromPerm, from);
+#ifdef VM_LITTLE_ENDIAN
+    __ vspltisb        (fSplt, 0x0f);
     __ vxor            (fromPerm, fromPerm, fSplt);
+#endif
     __ vperm           (vRet, vRet, vTmp1, fromPerm); // align [and byte swap in LE]
 
     // load keylen (44 or 52 or 60)
     __ lwz             (keylen, arrayOopDesc::length_offset_in_bytes() - arrayOopDesc::base_offset_in_bytes(T_INT), key);
 
     // to load keys
-    __ lvsr            (keyPerm, key);
+    __ load_perm       (keyPerm, key);
+#ifdef VM_LITTLE_ENDIAN
     __ vxor            (vTmp2, vTmp2, vTmp2);
     __ vspltisb        (vTmp2, -16);
     __ vrld            (keyPerm, keyPerm, vTmp2);
     __ vrld            (keyPerm, keyPerm, vTmp2);
-    __ vsldoi          (keyPerm, keyPerm, keyPerm, -8);
+    __ vsldoi          (keyPerm, keyPerm, keyPerm, 8);
+#endif
 
     __ cmpwi           (CCR0, keylen, 44);
     __ beq             (CCR0, L_do44);
@@ -2231,32 +2498,32 @@ class StubGenerator: public StubCodeGenerator {
     __ cmpwi           (CCR0, keylen, 52);
     __ beq             (CCR0, L_do52);
 
-    // load the 15th round key to vKey11
+    // load the 15th round key to vKey1
     __ li              (keypos, 240);
+    __ lvx             (vKey1, keypos, key);
+    __ li              (keypos, 224);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vKey2, vKey1, keyPerm);
+
+    // load the 14th round key to vKey2
+    __ li              (keypos, 208);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, vKey2, keyPerm);
+
+    // load the 13th round key to vKey3
+    __ li              (keypos, 192);
+    __ lvx             (vKey4, keypos, key);
+    __ vec_perm        (vKey3, vKey4, vKey3, keyPerm);
+
+    // load the 12th round key to vKey4
+    __ li              (keypos, 176);
+    __ lvx             (vKey5, keypos, key);
+    __ vec_perm        (vKey4, vKey5, vKey4, keyPerm);
+
+    // load the 11th round key to vKey5
+    __ li              (keypos, 160);
     __ lvx             (vTmp1, keypos, key);
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp1, vTmp2, keyPerm);
-
-    // load the 14th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp2, vTmp1, keyPerm);
-
-    // load the 13th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey3, vTmp1, vTmp2, keyPerm);
-
-    // load the 12th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey4, vTmp2, vTmp1, keyPerm);
-
-    // load the 11th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey5, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey5, vTmp1, vKey5, keyPerm);
 
     // 1st - 5th rounds
     __ vxor            (vRet, vRet, vKey1);
@@ -2269,22 +2536,22 @@ class StubGenerator: public StubCodeGenerator {
 
     __ bind            (L_do52);
 
-    // load the 13th round key to vKey11
+    // load the 13th round key to vKey1
     __ li              (keypos, 208);
-    __ lvx             (vTmp1, keypos, key);
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp1, vTmp2, keyPerm);
+    __ lvx             (vKey1, keypos, key);
+    __ li              (keypos, 192);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vKey2, vKey1, keyPerm);
 
-    // load the 12th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp2, vTmp1, keyPerm);
+    // load the 12th round key to vKey2
+    __ li              (keypos, 176);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, vKey2, keyPerm);
 
-    // load the 11th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey3, vTmp1, vTmp2, keyPerm);
+    // load the 11th round key to vKey3
+    __ li              (keypos, 160);
+    __ lvx             (vTmp1, keypos, key);
+    __ vec_perm        (vKey3, vTmp1, vKey3, keyPerm);
 
     // 1st - 3rd rounds
     __ vxor            (vRet, vRet, vKey1);
@@ -2295,42 +2562,42 @@ class StubGenerator: public StubCodeGenerator {
 
     __ bind            (L_do44);
 
-    // load the 11th round key to vKey11
+    // load the 11th round key to vKey1
     __ li              (keypos, 176);
+    __ lvx             (vKey1, keypos, key);
+    __ li              (keypos, 160);
     __ lvx             (vTmp1, keypos, key);
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp1, vTmp2, keyPerm);
+    __ vec_perm        (vKey1, vTmp1, vKey1, keyPerm);
 
     // 1st round
     __ vxor            (vRet, vRet, vKey1);
 
     __ bind            (L_doLast);
 
-    // load the 10th round key to vKey10
-    __ addi            (keypos, keypos, -16);
+    // load the 10th round key to vKey1
+    __ li              (keypos, 144);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vKey2, vTmp1, keyPerm);
+
+    // load the 9th round key to vKey2
+    __ li              (keypos, 128);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, vKey2, keyPerm);
+
+    // load the 8th round key to vKey3
+    __ li              (keypos, 112);
+    __ lvx             (vKey4, keypos, key);
+    __ vec_perm        (vKey3, vKey4, vKey3, keyPerm);
+
+    // load the 7th round key to vKey4
+    __ li              (keypos, 96);
+    __ lvx             (vKey5, keypos, key);
+    __ vec_perm        (vKey4, vKey5, vKey4, keyPerm);
+
+    // load the 6th round key to vKey5
+    __ li              (keypos, 80);
     __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey1, vTmp2, vTmp1, keyPerm);
-
-    // load the 9th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey2, vTmp1, vTmp2, keyPerm);
-
-    // load the 8th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey3, vTmp2, vTmp1, keyPerm);
-
-    // load the 7th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey4, vTmp1, vTmp2, keyPerm);
-
-    // load the 6th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey5, vTmp2, vTmp1, keyPerm);
+    __ vec_perm        (vKey5, vTmp1, vKey5, keyPerm);
 
     // last 10th - 6th rounds
     __ vncipher        (vRet, vRet, vKey1);
@@ -2339,30 +2606,29 @@ class StubGenerator: public StubCodeGenerator {
     __ vncipher        (vRet, vRet, vKey4);
     __ vncipher        (vRet, vRet, vKey5);
 
-    // load the 5th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey1, vTmp1, vTmp2, keyPerm);
+    // load the 5th round key to vKey1
+    __ li              (keypos, 64);
+    __ lvx             (vKey2, keypos, key);
+    __ vec_perm        (vKey1, vKey2, vTmp1, keyPerm);
 
-    // load the 4th round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey2, vTmp2, vTmp1, keyPerm);
+    // load the 4th round key to vKey2
+    __ li              (keypos, 48);
+    __ lvx             (vKey3, keypos, key);
+    __ vec_perm        (vKey2, vKey3, vKey2, keyPerm);
 
-    // load the 3rd round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey3, vTmp1, vTmp2, keyPerm);
+    // load the 3rd round key to vKey3
+    __ li              (keypos, 32);
+    __ lvx             (vKey4, keypos, key);
+    __ vec_perm        (vKey3, vKey4, vKey3, keyPerm);
 
-    // load the 2nd round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp1, keypos, key);
-    __ vperm           (vKey4, vTmp2, vTmp1, keyPerm);
+    // load the 2nd round key to vKey4
+    __ li              (keypos, 16);
+    __ lvx             (vKey5, keypos, key);
+    __ vec_perm        (vKey4, vKey5, vKey4, keyPerm);
 
-    // load the 1st round key to vKey10
-    __ addi            (keypos, keypos, -16);
-    __ lvx             (vTmp2, keypos, key);
-    __ vperm           (vKey5, vTmp1, vTmp2, keyPerm);
+    // load the 1st round key to vKey5
+    __ lvx             (vTmp1, key);
+    __ vec_perm        (vKey5, vTmp1, vKey5, keyPerm);
 
     // last 5th - 1th rounds
     __ vncipher        (vRet, vRet, vKey1);
@@ -2371,22 +2637,52 @@ class StubGenerator: public StubCodeGenerator {
     __ vncipher        (vRet, vRet, vKey4);
     __ vncipherlast    (vRet, vRet, vKey5);
 
-    __ neg             (temp, to);
-    __ lvsr            (toPerm, temp);
-    __ vspltisb        (vTmp2, -1);
-    __ vxor            (vTmp1, vTmp1, vTmp1);
-    __ vperm           (vTmp2, vTmp2, vTmp1, toPerm);
-    __ vxor            (toPerm, toPerm, fSplt);
+    // store result (unaligned)
+#ifdef VM_LITTLE_ENDIAN
+    __ lvsl            (toPerm, to);
+#else
+    __ lvsr            (toPerm, to);
+#endif
+    __ vspltisb        (vTmp3, -1);
+    __ vspltisb        (vTmp4, 0);
     __ lvx             (vTmp1, to);
-    __ vperm           (vRet, vRet, vRet, toPerm);
-    __ vsel            (vTmp1, vTmp1, vRet, vTmp2);
-    __ lvx             (vTmp4, fifteen, to);
+    __ lvx             (vTmp2, fifteen, to);
+#ifdef VM_LITTLE_ENDIAN
+    __ vperm           (vTmp3, vTmp3, vTmp4, toPerm); // generate select mask
+    __ vxor            (toPerm, toPerm, fSplt);       // swap bytes
+#else
+    __ vperm           (vTmp3, vTmp4, vTmp3, toPerm); // generate select mask
+#endif
+    __ vperm           (vTmp4, vRet, vRet, toPerm);   // rotate data
+    __ vsel            (vTmp2, vTmp4, vTmp2, vTmp3);
+    __ vsel            (vTmp1, vTmp1, vTmp4, vTmp3);
+    __ stvx            (vTmp2, fifteen, to);          // store this one first (may alias)
     __ stvx            (vTmp1, to);
-    __ vsel            (vRet, vRet, vTmp4, vTmp2);
-    __ stvx            (vRet, fifteen, to);
 
     __ blr();
      return start;
+  }
+
+  address generate_sha256_implCompress(bool multi_block, const char *name) {
+    assert(UseSHA, "need SHA instructions");
+    StubCodeMark mark(this, "StubRoutines", name);
+    address start = __ function_entry();
+
+    __ sha256 (multi_block);
+
+    __ blr();
+    return start;
+  }
+
+  address generate_sha512_implCompress(bool multi_block, const char *name) {
+    assert(UseSHA, "need SHA instructions");
+    StubCodeMark mark(this, "StubRoutines", name);
+    address start = __ function_entry();
+
+    __ sha512 (multi_block);
+
+    __ blr();
+    return start;
   }
 
   void generate_arraycopy_stubs() {
@@ -2473,6 +2769,86 @@ class StubGenerator: public StubCodeGenerator {
     __ blr();
   }
 
+  /**
+   * Arguments:
+   *
+   * Inputs:
+   *   R3_ARG1    - int   crc
+   *   R4_ARG2    - byte* buf
+   *   R5_ARG3    - int   length (of buffer)
+   *
+   * scratch:
+   *   R2, R6-R12
+   *
+   * Ouput:
+   *   R3_RET     - int   crc result
+   */
+  // Compute CRC32 function.
+  address generate_CRC32_updateBytes(const char* name) {
+    __ align(CodeEntryAlignment);
+    StubCodeMark mark(this, "StubRoutines", name);
+    address start = __ function_entry();  // Remember stub start address (is rtn value).
+
+    // arguments to kernel_crc32:
+    const Register crc     = R3_ARG1;  // Current checksum, preset by caller or result from previous call.
+    const Register data    = R4_ARG2;  // source byte array
+    const Register dataLen = R5_ARG3;  // #bytes to process
+
+    const Register table   = R6;       // crc table address
+
+#ifdef VM_LITTLE_ENDIAN
+    if (VM_Version::has_vpmsumb()) {
+      const Register constants    = R2;  // constants address
+      const Register bconstants   = R8;  // barret table address
+
+      const Register t0      = R9;
+      const Register t1      = R10;
+      const Register t2      = R11;
+      const Register t3      = R12;
+      const Register t4      = R7;
+
+      BLOCK_COMMENT("Stub body {");
+      assert_different_registers(crc, data, dataLen, table);
+
+      StubRoutines::ppc64::generate_load_crc_table_addr(_masm, table);
+      StubRoutines::ppc64::generate_load_crc_constants_addr(_masm, constants);
+      StubRoutines::ppc64::generate_load_crc_barret_constants_addr(_masm, bconstants);
+
+      __ kernel_crc32_1word_vpmsumd(crc, data, dataLen, table, constants, bconstants, t0, t1, t2, t3, t4);
+
+      BLOCK_COMMENT("return");
+      __ mr_if_needed(R3_RET, crc);      // Updated crc is function result. No copying required (R3_ARG1 == R3_RET).
+      __ blr();
+
+      BLOCK_COMMENT("} Stub body");
+    } else
+#endif
+    {
+      const Register t0      = R2;
+      const Register t1      = R7;
+      const Register t2      = R8;
+      const Register t3      = R9;
+      const Register tc0     = R10;
+      const Register tc1     = R11;
+      const Register tc2     = R12;
+
+      BLOCK_COMMENT("Stub body {");
+      assert_different_registers(crc, data, dataLen, table);
+
+      StubRoutines::ppc64::generate_load_crc_table_addr(_masm, table);
+
+      __ kernel_crc32_1word(crc, data, dataLen, table, t0, t1, t2, t3, tc0, tc1, tc2, table);
+
+      BLOCK_COMMENT("return");
+      __ mr_if_needed(R3_RET, crc);      // Updated crc is function result. No copying required (R3_ARG1 == R3_RET).
+      __ blr();
+
+      BLOCK_COMMENT("} Stub body");
+    }
+
+    return start;
+  }
+
   // Initialization
   void generate_initial() {
     // Generates all stubs and initializes the entry points
@@ -2491,6 +2867,12 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::_throw_StackOverflowError_entry   =
       generate_throw_exception("StackOverflowError throw_exception",
                                CAST_FROM_FN_PTR(address, SharedRuntime::throw_StackOverflowError), false);
+
+    // CRC32 Intrinsics.
+    if (UseCRC32Intrinsics) {
+      StubRoutines::_crc_table_adr    = (address)StubRoutines::ppc64::_crc_table;
+      StubRoutines::_updateBytesCRC32 = generate_CRC32_updateBytes("CRC32_updateBytes");
+    }
   }
 
   void generate_all() {
@@ -2531,6 +2913,15 @@ class StubGenerator: public StubCodeGenerator {
     if (UseMontgomerySquareIntrinsic) {
       StubRoutines::_montgomerySquare
         = CAST_FROM_FN_PTR(address, SharedRuntime::montgomery_square);
+    }
+
+    if (UseSHA256Intrinsics) {
+      StubRoutines::_sha256_implCompress   = generate_sha256_implCompress(false, "sha256_implCompress");
+      StubRoutines::_sha256_implCompressMB = generate_sha256_implCompress(true,  "sha256_implCompressMB");
+    }
+    if (UseSHA512Intrinsics) {
+      StubRoutines::_sha512_implCompress   = generate_sha512_implCompress(false, "sha512_implCompress");
+      StubRoutines::_sha512_implCompressMB = generate_sha512_implCompress(true, "sha512_implCompressMB");
     }
   }
 
