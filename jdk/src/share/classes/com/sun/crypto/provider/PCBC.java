@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package com.sun.crypto.provider;
 
 import java.security.InvalidKeyException;
 import java.security.ProviderException;
-
 
 /**
  * This class represents ciphers in Plaintext Cipher Block Chaining (PCBC)
@@ -136,9 +135,10 @@ final class PCBC extends FeedbackCipher {
     int encrypt(byte[] plain, int plainOffset, int plainLen,
                 byte[] cipher, int cipherOffset)
     {
-        if ((plainLen % blockSize) != 0) {
-            throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(plainLen, blockSize);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, plainLen);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, plainLen);
+
         int i;
         int endIndex = plainOffset + plainLen;
 
@@ -176,9 +176,10 @@ final class PCBC extends FeedbackCipher {
     int decrypt(byte[] cipher, int cipherOffset, int cipherLen,
                 byte[] plain, int plainOffset)
     {
-        if ((cipherLen % blockSize) != 0) {
-             throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(cipherLen, blockSize);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, cipherLen);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, cipherLen);
+
         int i;
         int endIndex = cipherOffset + cipherLen;
 

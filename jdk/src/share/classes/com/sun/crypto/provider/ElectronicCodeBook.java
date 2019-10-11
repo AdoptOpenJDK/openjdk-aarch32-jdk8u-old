@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -112,9 +112,10 @@ final class ElectronicCodeBook extends FeedbackCipher {
      * @return the length of the encrypted data
      */
     int encrypt(byte[] in, int inOff, int len, byte[] out, int outOff) {
-        if ((len % blockSize) != 0) {
-             throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(len, blockSize);
+        RangeUtil.nullAndBoundsCheck(in, inOff, len);
+        RangeUtil.nullAndBoundsCheck(out, outOff, len);
+
         for (int i = len; i >= blockSize; i -= blockSize) {
             embeddedCipher.encryptBlock(in, inOff, out, outOff);
             inOff += blockSize;
@@ -141,9 +142,10 @@ final class ElectronicCodeBook extends FeedbackCipher {
      * @return the length of the decrypted data
      */
     int decrypt(byte[] in, int inOff, int len, byte[] out, int outOff) {
-        if ((len % blockSize) != 0) {
-             throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(len, blockSize);
+        RangeUtil.nullAndBoundsCheck(in, inOff, len);
+        RangeUtil.nullAndBoundsCheck(out, outOff, len);
+
         for (int i = len; i >= blockSize; i -= blockSize) {
             embeddedCipher.decryptBlock(in, inOff, out, outOff);
             inOff += blockSize;

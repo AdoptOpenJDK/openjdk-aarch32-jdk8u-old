@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2007, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2007, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -29,7 +29,10 @@
 #include "sunfontids.h"
 #include "sun_font_FreetypeFontScaler.h"
 
-#include<stdlib.h>
+#include <stdlib.h>
+#if !defined(_WIN32) && !defined(__APPLE_)
+#include <dlfcn.h>
+#endif
 #include <math.h>
 #include "ft2build.h"
 #include FT_FREETYPE_H
@@ -38,6 +41,7 @@
 #include FT_SIZES_H
 #include FT_OUTLINE_H
 #include FT_SYNTHESIS_H
+#include FT_MODULE_H
 
 #include "fontscaler.h"
 
@@ -60,6 +64,7 @@ typedef struct {
     JNIEnv* env;
     FT_Library library;
     FT_Face face;
+    FT_Stream faceStream;
     jobject font2D;
     jobject directBuffer;
 
@@ -102,21 +107,14 @@ Java_sun_font_FreetypeFontScaler_initIDs(
 }
 
 static void freeNativeResources(JNIEnv *env, FTScalerInfo* scalerInfo) {
-    void *stream;
 
     if (scalerInfo == NULL)
         return;
 
-    //apparently Done_Face will only close the stream
-    // but will not relase the memory of stream structure.
-    // We need to free it explicitly to avoid leak.
-    //Direct access to the stream field might be not ideal solution as
-    // it is considred to be "private".
-    //Alternatively we could have stored pointer to the structure
-    // in the scalerInfo but this will increase size of the structure
-    // for no good reason
-    stream = scalerInfo->face->stream;
-
+    // FT_Done_Face always closes the stream, but only frees the memory
+    // of the data structure if it was internally allocated by FT.
+    // We hold on to a pointer to the stream structure if we provide it
+    // ourselves, so that we can free it here.
     FT_Done_Face(scalerInfo->face);
     FT_Done_FreeType(scalerInfo->library);
 
@@ -128,10 +126,9 @@ static void freeNativeResources(JNIEnv *env, FTScalerInfo* scalerInfo) {
         free(scalerInfo->fontData);
     }
 
-   if (stream != NULL) {
-        free(stream);
-   }
-
+    if (scalerInfo->faceStream != NULL) {
+        free(scalerInfo->faceStream);
+    }
     free(scalerInfo);
 }
 
@@ -211,6 +208,52 @@ static unsigned long ReadTTFontFileFunc(FT_Stream stream,
     }
 }
 
+typedef FT_Error (*FT_Prop_Set_Func)(FT_Library library,
+                                     const FT_String*  module_name,
+                                     const FT_String*  property_name,
+                                     const void*       value );
+
+/**
+ * Prefer the older v35 freetype byte code interpreter.
+ */
+static void setInterpreterVersion(FT_Library library) {
+
+    char* props = getenv("FREETYPE_PROPERTIES");
+    int version = 35;
+    const char* module = "truetype";
+    const char* property = "interpreter-version";
+
+    /* If some one is setting this, don't override it */
+    if (props != NULL && strstr(property, props)) {
+        return;
+    }
+    /*
+     * FT_Property_Set was introduced in 2.4.11.
+     * Some older supported Linux OSes may not include it so look
+     * this up dynamically.
+     * And if its not available it doesn't matter, since the reason
+     * we need it dates from 2.7.
+     * On Windows & Mac the library is always bundled so it is safe
+     * to use directly in those cases.
+     */
+#if defined(_WIN32) || defined(__APPLE__)
+    FT_Property_Set(library, module, property, (void*)(&version));
+#else
+    void *lib = dlopen("libfreetype.so", RTLD_LOCAL|RTLD_LAZY);
+    if (lib == NULL) {
+        lib = dlopen("libfreetype.so.6", RTLD_LOCAL|RTLD_LAZY);
+        if (lib == NULL) {
+            return;
+        }
+    }
+    FT_Prop_Set_Func func = (FT_Prop_Set_Func)dlsym(lib, "FT_Property_Set");
+    if (func != NULL) {
+        func(library, module, property, (void*)(&version));
+    }
+    dlclose(lib);
+#endif
+}
+
 /*
  * Class:     sun_font_FreetypeFontScaler
  * Method:    initNativeScaler
@@ -250,6 +293,7 @@ Java_sun_font_FreetypeFontScaler_initNativeScaler(
         free(scalerInfo);
         return 0;
     }
+    setInterpreterVersion(scalerInfo->library);
 
 #define TYPE1_FROM_JAVA        2
 
@@ -302,6 +346,9 @@ Java_sun_font_FreetypeFontScaler_initNativeScaler(
                                          &ft_open_args,
                                          indexInCollection,
                                          &scalerInfo->face);
+                    if (!error) {
+                        scalerInfo->faceStream = ftstream;
+                    }
                 }
                 if (error || scalerInfo->directBuffer == NULL) {
                     free(ftstream);
@@ -368,6 +415,19 @@ Java_sun_font_FreetypeFontScaler_createScalerContextNative(
     context->doBold = (boldness != 1.0);
     context->doItalize = (italic != 0);
 
+    /* freetype is very keen to use embedded bitmaps, even if it knows
+     * there is a rotation or you asked for antialiasing.
+     * In the rendering path we will check useSBits and disable
+     * bitmaps unless it is set. And here we set it only if none
+     * of the conditions invalidate using it.
+     * Note that we allow embedded bitmaps for the LCD case.
+     */
+    if ((aa != TEXT_AA_ON) && (fm != TEXT_FM_ON) &&
+        !context->doBold && !context->doItalize &&
+        (context->transform.yx == 0) && (context->transform.xy == 0))
+    {
+        context->useSbits = 1;
+    }
     return ptr_to_jlong(context);
 }
 
@@ -393,10 +453,18 @@ static int setupFTContext(JNIEnv *env,
     return errCode;
 }
 
-/* ftsynth.c uses (0x10000, 0x06000, 0x0, 0x10000) matrix to get oblique
-   outline.  Therefore x coordinate will change by 0x06000*y.
-   Note that y coordinate does not change. */
-#define OBLIQUE_MODIFIER(y)  (context->doItalize ? ((y)*6/16) : 0)
+/* ftsynth.c uses (0x10000, 0x0366A, 0x0, 0x10000) matrix to get oblique
+   outline.  Therefore x coordinate will change by 0x0366A*y.
+   Note that y coordinate does not change. These values are based on
+   libfreetype version 2.9.1. */
+#define OBLIQUE_MODIFIER(y)  (context->doItalize ? ((y)*0x366A/0x10000) : 0)
+
+/* FT_GlyphSlot_Embolden (ftsynth.c) uses FT_MulFix(units_per_EM, y_scale) / 24
+ * strength value when glyph format is FT_GLYPH_FORMAT_OUTLINE. This value has
+ * been taken from libfreetype version 2.6 and remain valid at least up to
+ * 2.9.1. */
+#define BOLD_MODIFIER(units_per_EM, y_scale) \
+    (context->doBold ? FT_MulFix(units_per_EM, y_scale) / 24 : 0)
 
 /*
  * Class:     sun_font_FreetypeFontScaler
@@ -475,7 +543,9 @@ Java_sun_font_FreetypeFontScaler_getFontMetricsNative(
     /* max advance */
     mx = (jfloat) FT26Dot6ToFloat(
                      scalerInfo->face->size->metrics.max_advance +
-                     OBLIQUE_MODIFIER(scalerInfo->face->size->metrics.height));
+                     OBLIQUE_MODIFIER(scalerInfo->face->size->metrics.height) +
+                     BOLD_MODIFIER(scalerInfo->face->units_per_EM,
+                             scalerInfo->face->size->metrics.y_scale));
     my = 0;
 
     metrics = (*env)->NewObject(env,
@@ -671,7 +741,7 @@ Java_sun_font_FreetypeFontScaler_getGlyphImageNative(
     UInt16 width, height;
     GlyphInfo *glyphInfo;
     int glyph_index;
-    int renderFlags = FT_LOAD_RENDER, target;
+    int renderFlags = FT_LOAD_DEFAULT, target;
     FT_GlyphSlot ftglyph;
 
     FTScalerContext* context =
@@ -689,9 +759,8 @@ Java_sun_font_FreetypeFontScaler_getGlyphImageNative(
         return ptr_to_jlong(getNullGlyphImage());
     }
 
-    /* if algorithmic styling is required then we do not request bitmap */
-    if (context->doBold || context->doItalize) {
-        renderFlags =  FT_LOAD_DEFAULT;
+    if (!context->useSbits) {
+        renderFlags |= FT_LOAD_NO_BITMAP;
     }
 
     /* NB: in case of non identity transform
@@ -734,7 +803,10 @@ Java_sun_font_FreetypeFontScaler_getGlyphImageNative(
     /* generate bitmap if it is not done yet
      e.g. if algorithmic styling is performed and style was added to outline */
     if (ftglyph->format == FT_GLYPH_FORMAT_OUTLINE) {
-        FT_Render_Glyph(ftglyph, FT_LOAD_TARGET_MODE(target));
+        error = FT_Render_Glyph(ftglyph, FT_LOAD_TARGET_MODE(target));
+        if (error != 0) {
+            return ptr_to_jlong(getNullGlyphImage());
+        }
     }
 
     width  = (UInt16) ftglyph->bitmap.width;

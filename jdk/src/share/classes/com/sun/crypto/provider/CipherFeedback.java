@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2014, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -149,9 +149,9 @@ final class CipherFeedback extends FeedbackCipher {
      */
     int encrypt(byte[] plain, int plainOffset, int plainLen,
                 byte[] cipher, int cipherOffset) {
-        if ((plainLen % numBytes) != 0) {
-            throw new ProviderException("Internal error in input buffering");
-        }
+        RangeUtil.blockSizeCheck(plainLen, numBytes);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, plainLen);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, plainLen);
 
         int nShift = blockSize - numBytes;
         int loopCount = plainLen / numBytes;
@@ -225,9 +225,10 @@ final class CipherFeedback extends FeedbackCipher {
      */
     int decrypt(byte[] cipher, int cipherOffset, int cipherLen,
                 byte[] plain, int plainOffset) {
-        if ((cipherLen % numBytes) != 0) {
-            throw new ProviderException("Internal error in input buffering");
-        }
+
+        RangeUtil.blockSizeCheck(cipherLen, numBytes);
+        RangeUtil.nullAndBoundsCheck(cipher, cipherOffset, cipherLen);
+        RangeUtil.nullAndBoundsCheck(plain, plainOffset, cipherLen);
 
         int nShift = blockSize - numBytes;
         int loopCount = cipherLen / numBytes;

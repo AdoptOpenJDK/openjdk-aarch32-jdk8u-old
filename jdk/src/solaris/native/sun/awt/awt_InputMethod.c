@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2018, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <X11/Xlib.h>
+#include <X11/keysym.h>
 #include <sys/time.h>
 
 #include "awt.h"
@@ -1318,9 +1319,14 @@ static void DestroyXIMCallback(XIM im, XPointer client_data, XPointer call_data)
     /* mark that XIM server was destroyed */
     X11im = NULL;
     JNIEnv* env = (JNIEnv *)JNU_GetEnv(jvm, JNI_VERSION_1_2);
+
+    AWT_LOCK();
     /* free the old pX11IMData and set it to null. this also avoids crashing
      * the jvm if the XIM server reappears */
-    X11InputMethodData *pX11IMData = getX11InputMethodData(env, currentX11InputMethodInstance);
+    while (x11InputMethodGRefListHead != NULL) {
+        getX11InputMethodData(env, x11InputMethodGRefListHead->inputMethodGRef);
+    }
+    AWT_UNLOCK();
 }
 
 /*
